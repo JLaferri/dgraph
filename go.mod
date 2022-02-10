@@ -7,7 +7,8 @@ go 1.16
 // replace github.com/dgraph-io/sroar => /home/ash/go/src/github.com/dgraph-io/sroar
 
 require (
-	cloud.google.com/go/storage v1.15.0
+	cloud.google.com/go v0.60.0 // indirect
+	cloud.google.com/go/storage v1.10.0
 	contrib.go.opencensus.io/exporter/jaeger v0.1.0
 	contrib.go.opencensus.io/exporter/prometheus v0.1.0
 	github.com/Azure/azure-storage-blob-go v0.13.0
@@ -33,16 +34,20 @@ require (
 	github.com/docker/distribution v2.7.1+incompatible // indirect
 	github.com/docker/docker v1.13.1
 	github.com/dustin/go-humanize v1.0.0
+	github.com/envoyproxy/go-control-plane v0.9.9-0.20210217033140-668b12f5399d // indirect
 	github.com/getsentry/sentry-go v0.6.0
 	github.com/go-sql-driver/mysql v0.0.0-20190330032241-c0f6b444ad8f
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/geo v0.0.0-20170810003146-31fb0106dc4a
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/golang/mock v1.5.0 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/golang/snappy v0.0.3
 	github.com/google/codesearch v1.0.0
 	github.com/google/go-cmp v0.5.5
+	github.com/google/martian/v3 v3.1.0 // indirect
+	github.com/google/pprof v0.0.0-20210226084205-cbba55b83ad5 // indirect
 	github.com/google/uuid v1.1.2
 	github.com/gorilla/websocket v1.4.2
 	github.com/graph-gophers/graphql-go v0.0.0-20200309224638-dae41bde9ef9
@@ -53,9 +58,8 @@ require (
 	github.com/pierrec/lz4 v2.6.0+incompatible // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/pkg/profile v1.2.1
-	github.com/prometheus/client_golang v0.9.3
+	github.com/prometheus/client_golang v1.0.0
 	github.com/prometheus/common v0.4.1 // indirect
-	github.com/prometheus/procfs v0.0.0-20190517135640-51af30a78b0e // indirect
 	github.com/sergi/go-diff v1.1.0
 	github.com/soheilhy/cmux v0.1.4
 	github.com/spf13/cast v1.3.0
@@ -66,8 +70,8 @@ require (
 	github.com/tinylib/msgp v1.1.5 // indirect
 	github.com/twpayne/go-geom v1.0.5
 	github.com/xdg/scram v0.0.0-20180814205039-7eeb5667e42c
-	go.etcd.io/etcd v0.0.0-20190228193606-a943ad0ee4c9
-	go.opencensus.io v0.23.0
+	go.etcd.io/etcd v0.5.0-alpha.5.0.20220130202422-a905430d27ec // indirect
+	go.opencensus.io v0.22.5
 	go.uber.org/zap v1.16.0
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
@@ -76,10 +80,9 @@ require (
 	golang.org/x/sys v0.0.0-20210511113859-b0526f3d8744
 	golang.org/x/text v0.3.6
 	golang.org/x/tools v0.1.6-0.20210802203754-9b21a8868e16
-	google.golang.org/api v0.46.0
-	google.golang.org/genproto v0.0.0-20210510173355-fb37daa5cd7a // indirect
-	google.golang.org/grpc v1.37.1
-	google.golang.org/grpc/examples v0.0.0-20210518002758-2713b77e8526 // indirect
+	google.golang.org/api v0.29.0
+	google.golang.org/appengine v1.6.7 // indirect
+	google.golang.org/grpc v1.29.1 // indirect
 	gopkg.in/DataDog/dd-trace-go.v1 v1.13.1 // indirect
 	gopkg.in/square/go-jose.v2 v2.3.1
 	gopkg.in/yaml.v2 v2.2.8
