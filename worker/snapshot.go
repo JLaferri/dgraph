@@ -47,8 +47,7 @@ type badgerWriter interface {
 
 // populateSnapshot gets data for a shard from the leader and writes it to BadgerDB on the follower.
 func (n *node) populateSnapshot(snap pb.Snapshot, pl *conn.Pool) error {
-	con := pl.Get()
-	c := pb.NewWorkerClient(con)
+	c := pb.NewWorkerClient(pl.Get())
 
 	// We should absolutely cancel the context when we return from this function, that way, the
 	// leader who is sending the snapshot would stop sending.
@@ -115,6 +114,8 @@ func (n *node) populateSnapshot(snap pb.Snapshot, pl *conn.Pool) error {
 	if err := deleteStalePreds(ctx, done, snap.ReadTs); err != nil {
 		return err
 	}
+	// Reset the cache after having received a snapshot.
+	posting.ResetCache()
 
 	glog.Infof("Snapshot writes DONE. Sending ACK")
 	// Send an acknowledgement back to the leader.
