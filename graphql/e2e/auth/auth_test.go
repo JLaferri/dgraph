@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- *    Copyright 2022 Dgraph Labs, Inc. and Contributors
+ *    Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +16,7 @@
  * limitations under the License.
  */
 
+//nolint:lll
 package auth
 
 import (
@@ -33,6 +36,7 @@ import (
 	"github.com/dgraph-io/dgraph/graphql/authorization"
 	"github.com/dgraph-io/dgraph/graphql/e2e/common"
 	"github.com/dgraph-io/dgraph/testutil"
+	"github.com/dgraph-io/dgraph/x"
 )
 
 var (
@@ -1053,14 +1057,10 @@ func getColID(t *testing.T, tcase TestCase) string {
 
 	gqlResponse := getUserParams.ExecuteAsPost(t, common.GraphqlURL)
 	common.RequireNoGQLErrors(t, gqlResponse)
-
-	err := json.Unmarshal(gqlResponse.Data, &result)
-	require.Nil(t, err)
-
+	require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 	if len(result.QueryColumn) > 0 {
 		return result.QueryColumn[0].ColID
 	}
-
 	return ""
 }
 
@@ -1134,7 +1134,7 @@ func getProjectID(t *testing.T, tcase TestCase) string {
 	common.RequireNoGQLErrors(t, gqlResponse)
 
 	err := json.Unmarshal(gqlResponse.Data, &result)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	if len(result.QueryProject) > 0 {
 		return result.QueryProject[0].ProjID
@@ -1772,9 +1772,7 @@ func AddDeleteAuthTestData(t *testing.T) {
 		"UserSecret.aSecret": "Secret data",
 		"UserSecret.ownedBy": "user1"
 		}]`
-
-	err = common.PopulateGraphQLData(client, []byte(data))
-	require.NoError(t, err)
+	require.NoError(t, common.PopulateGraphQLData(client, []byte(data)))
 }
 
 func AddDeleteDeepAuthTestData(t *testing.T) {
@@ -1792,8 +1790,7 @@ func AddDeleteDeepAuthTestData(t *testing.T) {
 	require.NoError(t, err)
 
 	var user uidResult
-	err = json.Unmarshal(resp.Json, &user)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp.Json, &user))
 	require.True(t, len(user.Query) == 3)
 
 	columnQuery := `{
@@ -1806,8 +1803,7 @@ func AddDeleteDeepAuthTestData(t *testing.T) {
 	require.NoError(t, err)
 
 	var column uidResult
-	err = json.Unmarshal(resp.Json, &column)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp.Json, &column))
 	require.True(t, len(column.Query) == 1)
 
 	data := fmt.Sprintf(`[{
@@ -1817,9 +1813,7 @@ func AddDeleteDeepAuthTestData(t *testing.T) {
 		"Ticket.title": "Ticket1",
 		"ticket.assignedTo": [{"uid": "%s"}, {"uid": "%s"}, {"uid": "%s"}]
 	}]`, column.Query[0].UID, user.Query[0].UID, user.Query[1].UID, user.Query[2].UID)
-
-	err = common.PopulateGraphQLData(client, []byte(data))
-	require.NoError(t, err)
+	require.NoError(t, common.PopulateGraphQLData(client, []byte(data)))
 }
 
 func TestDeleteDeepAuthRule(t *testing.T) {
@@ -1939,14 +1933,10 @@ func TestMain(m *testing.M) {
 	jwtAlgo := []string{jwt.SigningMethodHS256.Name, jwt.SigningMethodRS256.Name}
 	for _, algo := range jwtAlgo {
 		authSchema, err := testutil.AppendAuthInfo(schema, algo, "./sample_public_key.pem", false)
-		if err != nil {
-			panic(err)
-		}
+		x.Panic(err)
 
 		authMeta, err := authorization.Parse(string(authSchema))
-		if err != nil {
-			panic(err)
-		}
+		x.Panic(err)
 
 		metaInfo = &testutil.AuthMeta{
 			PublicKey:      authMeta.VerificationKey,
@@ -2202,9 +2192,7 @@ func TestAuthWithSecretDirective(t *testing.T) {
 	var result struct {
 		CheckUserPassword *common.User `json:"checkUserPassword,omitempty"`
 	}
-
-	err := json.Unmarshal([]byte(gqlResponse.Data), &result)
-	require.Nil(t, err)
+	require.NoError(t, json.Unmarshal([]byte(gqlResponse.Data), &result))
 
 	opt := cmpopts.IgnoreFields(common.User{}, "Password")
 	if diff := cmp.Diff(newUser, result.CheckUserPassword, opt); diff != "" {
@@ -2236,8 +2224,7 @@ func TestAuthWithSecretDirective(t *testing.T) {
 		}
 	}
 
-	err = json.Unmarshal([]byte(gqlResponse.Data), &addLogResult)
-	require.Nil(t, err)
+	require.NoError(t, json.Unmarshal([]byte(gqlResponse.Data), &addLogResult))
 	// Id of the created log
 	logID := addLogResult.AddLog.Log[0].Id
 
@@ -2246,10 +2233,7 @@ func TestAuthWithSecretDirective(t *testing.T) {
 	var resultLog struct {
 		CheckLogPassword *Log `json:"checkLogPassword,omitempty"`
 	}
-
-	err = json.Unmarshal([]byte(gqlResponse.Data), &resultLog)
-	require.Nil(t, err)
-
+	require.NoError(t, json.Unmarshal([]byte(gqlResponse.Data), &resultLog))
 	require.Equal(t, resultLog.CheckLogPassword.Id, logID)
 
 	// checkLogPassword with RBAC rule false should not work

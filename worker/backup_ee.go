@@ -2,13 +2,13 @@
 // +build !oss
 
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Dgraph Community License (the "License"); you
  * may not use this file except in compliance with the License. You
  * may obtain a copy of the License at
  *
- *     https://github.com/dgraph-io/dgraph/blob/master/licenses/DCL.txt
+ *     https://github.com/dgraph-io/dgraph/blob/main/licenses/DCL.txt
  */
 
 package worker
@@ -31,9 +31,9 @@ import (
 	"github.com/pkg/errors"
 	ostats "go.opencensus.io/stats"
 
-	"github.com/dgraph-io/badger/v3"
-	bpb "github.com/dgraph-io/badger/v3/pb"
-	"github.com/dgraph-io/badger/v3/y"
+	"github.com/dgraph-io/badger/v4"
+	bpb "github.com/dgraph-io/badger/v4/pb"
+	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/dgraph/ee/enc"
 	"github.com/dgraph-io/dgraph/posting"
 	"github.com/dgraph-io/dgraph/protos/pb"
@@ -220,19 +220,19 @@ func ProcessBackupRequest(ctx context.Context, req *pb.BackupRequest) error {
 
 	var dropOperations []*pb.DropOperation
 	for range groups {
-		if backupRes := <-resCh; backupRes.err != nil {
+		backupRes := <-resCh
+		if backupRes.err != nil {
 			glog.Errorf("Error received during backup: %v", backupRes.err)
 			return backupRes.err
-		} else {
-			dropOperations = append(dropOperations, backupRes.res.GetDropOperations()...)
 		}
+		dropOperations = append(dropOperations, backupRes.res.GetDropOperations()...)
 	}
 
 	dir := fmt.Sprintf(backupPathFmt, req.UnixTs)
 	m := Manifest{
 		ReadTs:         req.ReadTs,
 		Groups:         predMap,
-		Version:        x.DgraphVersion,
+		Version:        x.ManifestVersion,
 		DropOperations: dropOperations,
 		Path:           dir,
 		Compression:    "snappy",
@@ -246,7 +246,7 @@ func ProcessBackupRequest(ctx context.Context, req *pb.BackupRequest) error {
 		m.BackupId = latestManifest.BackupId
 		m.BackupNum = latestManifest.BackupNum + 1
 	}
-	m.Encrypted = (x.WorkerConfig.EncryptionKey != nil)
+	m.Encrypted = x.WorkerConfig.EncryptionKey != nil
 
 	bp := NewBackupProcessor(nil, req)
 	defer bp.Close()
@@ -324,7 +324,7 @@ func (pr *BackupProcessor) Close() {
 		if pr.txn != nil {
 			th.itr.Close()
 		}
-		th.buf.Release()
+		_ = th.buf.Release()
 	}
 	if pr.txn != nil {
 		pr.txn.Discard()
@@ -555,14 +555,14 @@ func (pr *BackupProcessor) CompleteBackup(ctx context.Context, m *Manifest) erro
 		return err
 	}
 
-	manifest, err := GetManifest(handler, uri)
+	manifest, err := GetManifestNoUpgrade(handler, uri)
 	if err != nil {
 		return err
 	}
 	manifest.Manifests = append(manifest.Manifests, m)
 
-	if err := createManifest(handler, uri, manifest); err != nil {
-		return errors.Wrap(err, "Complete backup failed")
+	if err := CreateManifest(handler, uri, manifest); err != nil {
+		return errors.Wrap(err, "complete backup failed")
 	}
 	glog.Infof("Backup completed OK.")
 	return nil

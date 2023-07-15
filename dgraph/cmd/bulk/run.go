@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ package bulk
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"net/http"
@@ -32,7 +31,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/dgraph/ee"
 	"github.com/dgraph-io/dgraph/filestore"
 	"github.com/dgraph-io/dgraph/protos/pb"
@@ -102,8 +101,7 @@ func init() {
 	flag.StringP("zero", "z", "localhost:5080", "gRPC address for Dgraph zero")
 	flag.String("xidmap", "", "Directory to store xid to uid mapping")
 	// TODO: Potentially move http server to main.
-	flag.String("http", "localhost:8080",
-		"Address to serve http (pprof).")
+	flag.String("http", "localhost:8080", "Address to serve http (pprof).")
 	flag.Bool("ignore_errors", false, "ignore line parsing errors in rdf files")
 	flag.Int("map_shards", 1,
 		"Number of map output shards. Must be greater than or equal to the number of reduce "+
@@ -316,7 +314,7 @@ func run() {
 	bulkMetaPath := filepath.Join(opt.TmpDir, bulkMetaFilename)
 
 	if opt.SkipMapPhase {
-		bulkMetaData, err := ioutil.ReadFile(bulkMetaPath)
+		bulkMetaData, err := os.ReadFile(bulkMetaPath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error reading from bulk meta file")
 			os.Exit(1)
@@ -346,7 +344,7 @@ func run() {
 			fmt.Fprintln(os.Stderr, "Error serializing bulk meta file")
 			os.Exit(1)
 		}
-		if err = ioutil.WriteFile(bulkMetaPath, bulkMetaData, 0600); err != nil {
+		if err = os.WriteFile(bulkMetaPath, bulkMetaData, 0600); err != nil {
 			fmt.Fprintln(os.Stderr, "Error writing to bulk meta file")
 			os.Exit(1)
 		}

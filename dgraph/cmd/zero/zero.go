@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import (
 	"github.com/pkg/errors"
 	otrace "go.opencensus.io/trace"
 
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/conn"
 	"github.com/dgraph-io/dgraph/protos/pb"
 	"github.com/dgraph-io/dgraph/telemetry"
@@ -592,7 +592,7 @@ func (s *Server) Connect(ctx context.Context,
 		if m.Id == 0 {
 			// In certain situations, the proposal can be sent and return with an error.
 			// However,  Dgraph will keep retrying the proposal. To avoid assigning duplicating
-			// IDs, the couter is incremented every time a proposal is created.
+			// IDs, the counter is incremented every time a proposal is created.
 			m.Id = s.nextRaftId
 			s.nextRaftId += 1
 			proposal.MaxRaftId = m.Id

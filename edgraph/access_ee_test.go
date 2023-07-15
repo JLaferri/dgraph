@@ -2,13 +2,13 @@
 // +build !oss
 
 /*
- * Copyright 2022 Dgraph Labs, Inc. All rights reserved.
+ * Copyright 2023 Dgraph Labs, Inc. All rights reserved.
  *
  * Licensed under the Dgraph Community License (the "License"); you
  * may not use this file except in compliance with the License. You
  * may obtain a copy of the License at
  *
- *     https://github.com/dgraph-io/dgraph/blob/master/licenses/DCL.txt
+ *     https://github.com/dgraph-io/dgraph/blob/main/licenses/DCL.txt
  */
 
 package edgraph
@@ -61,15 +61,16 @@ func TestValidateToken(t *testing.T) {
 	for _, userdata := range userDataList {
 		tokenString := generateJWT(userdata.namespace, userdata.userId, userdata.groupIds, expiry)
 		ud, err := validateToken(tokenString)
-		require.Nil(t, err)
-		if ud.namespace != userdata.namespace || ud.userId != userdata.userId || !sliceCompare(ud.groupIds, userdata.groupIds) {
+		require.NoError(t, err)
+		if ud.namespace != userdata.namespace || ud.userId != userdata.userId ||
+			!sliceCompare(ud.groupIds, userdata.groupIds) {
+
 			t.Errorf("Actual output %+v is not equal to the expected output %+v", userdata, ud)
 		}
 	}
 }
 
 func TestGetAccessJwt(t *testing.T) {
-
 	grpLst := []acl.Group{
 		{
 			Uid:     "100",
@@ -98,10 +99,12 @@ func TestGetAccessJwt(t *testing.T) {
 		{3456789012, "user3", []string{"702", "703"}},
 	}
 
+	worker.Config.AccessJwtTtl = 20 * time.Second
 	for _, userdata := range userDataList {
-		jwtstr, _ := getAccessJwt(userdata.userId, grpLst, userdata.namespace)
+		jwtstr, err := getAccessJwt(userdata.userId, grpLst, userdata.namespace)
+		require.NoError(t, err)
 		ud, err := validateToken(jwtstr)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		if ud.namespace != userdata.namespace || ud.userId != userdata.userId || !sliceCompare(ud.groupIds, g) {
 			t.Errorf("Actual output {%v %v %v} is not equal to the output %v generated from"+
 				" getAccessJwt() token", userdata.namespace, userdata.userId, grpLst, ud)
@@ -119,7 +122,7 @@ func TestGetRefreshJwt(t *testing.T) {
 	for _, userdata := range userDataList {
 		jwtstr, _ := getRefreshJwt(userdata.userId, userdata.namespace)
 		ud, err := validateToken(jwtstr)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		if ud.namespace != userdata.namespace || ud.userId != userdata.userId {
 			t.Errorf("Actual output {%v %v} is not equal to the output {%v %v} generated from"+
 				"getRefreshJwt() token", userdata.namespace, userdata.userId, ud.namespace, ud.userId)

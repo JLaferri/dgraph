@@ -1,8 +1,27 @@
 name: ci-golang-lint
 on:
   push:
+    paths-ignore:
+      - '.github/CODEOWNERS'
+      - '.vscode/**'
+      - 'compose/**'
+      - 'contrib/systemd/**'
+      - 'licenses/**'
+      - 'paper/**'
+      - 'present/**'
+      - 'RFC/**'
+      - 'static/**'
+      - 'wiki/**'
+      - '**/**.dockerignore'
+      - '**/**.gitignore'
+      - '**/**.md'
+      - '**/**.png'
+      - '**/**.jpg'
+      - '**/**.gif'
+      - '**/**.ini'
     branches:
       - main
+      - 'release/**'
   pull_request:
     types:
       - opened
@@ -11,12 +30,12 @@ on:
       - ready_for_review
     branches:
       - main
+      - 'release/**'
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 */2 * * *" # every 2hrs
 jobs:
   golang-lint:
-    # TODO: uncomment this after release work
-    # if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false
     name: lint
     runs-on: ubuntu-20.04
     steps:

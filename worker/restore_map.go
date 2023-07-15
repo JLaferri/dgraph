@@ -8,7 +8,7 @@
  * may not use this file except in compliance with the License. You
  * may obtain a copy of the License at
  *
- *     https://github.com/dgraph-io/dgraph/blob/master/licenses/DCL.txt
+ *     https://github.com/dgraph-io/dgraph/blob/main/licenses/DCL.txt
  */
 
 package worker
@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -36,8 +37,8 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 
-	bpb "github.com/dgraph-io/badger/v3/pb"
-	"github.com/dgraph-io/badger/v3/y"
+	bpb "github.com/dgraph-io/badger/v4/pb"
+	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/dgraph/codec"
 	"github.com/dgraph-io/dgraph/ee"
 	"github.com/dgraph-io/dgraph/ee/enc"
@@ -109,7 +110,7 @@ type loadBackupInput struct {
 	restoreTs   uint64
 	preds       predicateSet
 	dropNs      map[uint64]struct{}
-	isOld       bool
+	version     int
 	keepSchema  bool
 	compression string
 }
@@ -154,16 +155,21 @@ type mapper struct {
 	maxNs  uint64
 }
 
-func (mw *mapper) newMapFile() (*os.File, error) {
-	fileNum := atomic.AddUint32(&mw.nextId, 1)
-	filename := filepath.Join(mw.mapDir, fmt.Sprintf("%06d.map", fileNum))
+func (m *mapper) newMapFile() (*os.File, error) {
+	fileNum := atomic.AddUint32(&m.nextId, 1)
+	filename := filepath.Join(m.mapDir, fmt.Sprintf("%06d.map", fileNum))
 	x.Check(os.MkdirAll(filepath.Dir(filename), 0750))
 
 	return os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 }
 
 func (m *mapper) writeToDisk(buf *z.Buffer) error {
-	defer buf.Release()
+	defer func() {
+		if err := buf.Release(); err != nil {
+			glog.Warningf("error in releasing buffer: %v", err)
+		}
+	}()
+
 	if buf.IsEmpty() {
 		return nil
 	}
@@ -172,12 +178,16 @@ func (m *mapper) writeToDisk(buf *z.Buffer) error {
 	if err != nil {
 		return errors.Wrap(err, "openOutputFile")
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			glog.Warningf("error while closing fd: %v", err)
+		}
+	}()
 
 	// Create partition keys for the map file.
 	header := &pb.MapHeader{PartitionKeys: [][]byte{}}
 	var bufSize int
-	buf.SliceIterate(func(slice []byte) error {
+	err = buf.SliceIterate(func(slice []byte) error {
 		bufSize += 4 + len(slice)
 		if bufSize < partitionBufSz {
 			return nil
@@ -192,6 +202,10 @@ func (m *mapper) writeToDisk(buf *z.Buffer) error {
 		bufSize = 0
 		return nil
 	})
+	if err != nil {
+		glog.Errorf("error in iterating over buffer: %v", err)
+		return err
+	}
 
 	// Write the header to the map file.
 	headerBuf, err := header.Marshal()
@@ -226,43 +240,43 @@ func (m *mapper) writeToDisk(buf *z.Buffer) error {
 		glog.Infof("Created new backup map file: %s of size: %s\n",
 			fi.Name(), humanize.IBytes(uint64(fi.Size())))
 	}
-	return f.Close()
+	return nil
 }
 
-func (mw *mapper) sendForWriting() error {
-	if mw.buf.IsEmpty() {
+func (m *mapper) sendForWriting() error {
+	if m.buf.IsEmpty() {
 		return nil
 	}
-	mw.buf.SortSlice(func(ls, rs []byte) bool {
+	m.buf.SortSlice(func(ls, rs []byte) bool {
 		lme := mapEntry(ls)
 		rme := mapEntry(rs)
 		return y.CompareKeys(lme.Key(), rme.Key()) < 0
 	})
 
-	if err := mw.thr.Do(); err != nil {
+	if err := m.thr.Do(); err != nil {
 		return err
 	}
 	go func(buf *z.Buffer) {
-		err := mw.writeToDisk(buf)
-		mw.thr.Done(err)
-	}(mw.buf)
-	mw.buf = z.NewBuffer(mapFileSz, "Restore.Buffer")
+		err := m.writeToDisk(buf)
+		m.thr.Done(err)
+	}(m.buf)
+	m.buf = z.NewBuffer(mapFileSz, "Restore.Buffer")
 	return nil
 }
 
-func (mw *mapper) Flush() error {
+func (m *mapper) Flush() error {
 	cl := func() error {
-		if err := mw.sendForWriting(); err != nil {
+		if err := m.sendForWriting(); err != nil {
 			return err
 		}
-		if err := mw.thr.Finish(); err != nil {
+		if err := m.thr.Finish(); err != nil {
 			return err
 		}
-		return mw.buf.Release()
+		return m.buf.Release()
 	}
 
 	var rerr error
-	mw.once.Do(func() {
+	m.once.Do(func() {
 		rerr = cl()
 	})
 	return rerr
@@ -278,7 +292,11 @@ func fromBackupKey(key []byte) ([]byte, uint64, error) {
 
 func (m *mapper) processReqCh(ctx context.Context) error {
 	buf := z.NewBuffer(20<<20, "processKVList")
-	defer buf.Release()
+	defer func() {
+		if err := buf.Release(); err != nil {
+			glog.Warningf("error in releasing buffer: %v", err)
+		}
+	}()
 
 	maxNs := uint64(0)
 	maxUid := uint64(0)
@@ -360,14 +378,17 @@ func (m *mapper) processReqCh(ctx context.Context) error {
 				// This is a complete list. It should be rolled up to avoid writing
 				// a list that is too big to be read back from disk.
 				// Rollup will take ownership of the Pack and will free the memory.
+				// We do rollup at math.MaxUint64 so that we don't change the timestamps.
 				l := posting.NewList(restoreKey, pl, kv.Version)
-				kvs, err := l.Rollup(nil)
+				kvs, err := l.Rollup(nil, math.MaxUint64)
 				if err != nil {
 					// TODO: wrap errors in this file for easier debugging.
 					return err
 				}
 				for _, kv := range kvs {
-					if err := toBuffer(kv, kv.Version); err != nil {
+					version := kv.Version
+					kv.Version = m.restoreTs
+					if err := toBuffer(kv, version); err != nil {
 						return err
 					}
 				}
@@ -388,18 +409,66 @@ func (m *mapper) processReqCh(ctx context.Context) error {
 				kv.Value, err = update.Marshal()
 				return err
 			}
-			if in.isOld && parsedKey.IsType() {
-				if err := appendNamespace(); err != nil {
-					glog.Errorf("Unable to (un)marshal type: %+v. Err=%v\n", parsedKey, err)
+			changeFormat := func() error {
+				// In the backup taken on 2103, we have the schemaUpdate.Predicate in format
+				// <namespace 8 bytes>|<attribute>. That had issues with JSON marshalling.
+				// So, we switched over to the format <namespace hex string>-<attribute>.
+				var err error
+				if parsedKey.IsSchema() {
+					var update pb.SchemaUpdate
+					if err := update.Unmarshal(kv.Value); err != nil {
+						return err
+					}
+					if update.Predicate, err = x.AttrFrom2103(update.Predicate); err != nil {
+						return err
+					}
+					kv.Value, err = update.Marshal()
+					return err
+				}
+				if parsedKey.IsType() {
+					var update pb.TypeUpdate
+					if err := update.Unmarshal(kv.Value); err != nil {
+						return err
+					}
+					if update.TypeName, err = x.AttrFrom2103(update.TypeName); err != nil {
+						return err
+					}
+					for _, sch := range update.Fields {
+						if sch.Predicate, err = x.AttrFrom2103(sch.Predicate); err != nil {
+							return err
+						}
+					}
+					kv.Value, err = update.Marshal()
+					return err
+				}
+				return nil
+			}
+			// We changed the format of predicate in 2103 and 2105. SchemaUpdate and TypeUpdate have
+			// predicate stored within them, so they also need to be updated accordingly.
+			switch in.version {
+			case 0:
+				if parsedKey.IsType() {
+					if err := appendNamespace(); err != nil {
+						glog.Errorf("Unable to (un)marshal type: %+v. Err=%v\n", parsedKey, err)
+						return nil
+					}
+				}
+			case 2103:
+				if err := changeFormat(); err != nil {
+					glog.Errorf("Unable to change format for: %+v Err=%+v", parsedKey, err)
 					return nil
 				}
+			default:
+				// for manifest versions >= 2015, do nothing.
 			}
 			// Reset the StreamId to prevent ordering issues while writing to stream writer.
 			kv.StreamId = 0
 			// Schema and type keys are not stored in an intermediate format so their
 			// value can be written as is.
+			version := kv.Version
+			kv.Version = m.restoreTs
 			kv.Key = restoreKey
-			if err := toBuffer(kv, kv.Version); err != nil {
+			if err := toBuffer(kv, version); err != nil {
 				return err
 			}
 
@@ -430,7 +499,11 @@ func (m *mapper) processReqCh(ctx context.Context) error {
 
 	var list bpb.KVList
 	process := func(req listReq) error {
-		defer req.lbuf.Release()
+		defer func() {
+			if err := req.lbuf.Release(); err != nil {
+				glog.Warningf("error in releasing buffer: %v", err)
+			}
+		}()
 
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -514,7 +587,7 @@ func (m *mapper) Progress() {
 const bufSz = 64 << 20
 const bufSoftLimit = bufSz - 2<<20
 
-// mapToDisk reads the backup, converts the keys and values to the required format,
+// Map reads the backup, converts the keys and values to the required format,
 // and loads them to the given badger DB. The set of predicates is used to avoid restoring
 // values from predicates no longer assigned to this group.
 // If restoreTs is greater than zero, the key-value pairs will be written with that timestamp.
@@ -529,7 +602,8 @@ func (m *mapper) Map(r io.Reader, in *loadBackupInput) error {
 		err := binary.Read(br, binary.LittleEndian, &sz)
 		if err == io.EOF {
 			break
-		} else if err != nil {
+		}
+		if err != nil {
 			return err
 		}
 
@@ -553,6 +627,15 @@ func (m *mapper) Map(r io.Reader, in *loadBackupInput) error {
 type mapResult struct {
 	maxUid uint64
 	maxNs  uint64
+
+	// shouldDropAll is used for incremental restores. In case of normal restore, we just don't
+	// process the backups after encountering a drop operation (while iterating from latest
+	// to the oldest baskup). But for incremental restore if a drop operation is encountered, we
+	// need to call a dropAll, so that the data written in the DB because of a normal restore is
+	// cleaned up before an incremental restore.
+	shouldDropAll bool
+	dropAttr      map[string]struct{}
+	dropNs        map[uint64]struct{}
 }
 
 // we create MAP files each of a limited size and write sorted data into it. We may end up
@@ -613,7 +696,9 @@ func RunMapper(req *pb.RestoreRequest, mapDir string) (*mapResult, error) {
 	}
 	go mapper.Progress()
 	defer func() {
-		mapper.Flush()
+		if err := mapper.Flush(); err != nil {
+			glog.Warningf("error calling flush during map: %v", err)
+		}
 		mapper.closer.SignalAndWait()
 	}()
 
@@ -624,6 +709,11 @@ func RunMapper(req *pb.RestoreRequest, mapDir string) (*mapResult, error) {
 
 	// manifests are ordered as: latest..full
 	for i, manifest := range manifests {
+		// We only need to consider the incremental backups.
+		if manifest.BackupNum < req.IncrementalFrom {
+			break
+		}
+
 		// A dropAll or DropData operation is encountered. No need to restore previous backups.
 		if dropAll {
 			break
@@ -661,7 +751,7 @@ func RunMapper(req *pb.RestoreRequest, mapDir string) (*mapResult, error) {
 			in := &loadBackupInput{
 				preds:     predSet,
 				dropNs:    localDropNs,
-				isOld:     manifest.Version == 0,
+				version:   manifest.Version,
 				restoreTs: req.RestoreTs,
 				// Only map the schema keys corresponding to the latest backup.
 				keepSchema:  i == 0,
@@ -682,23 +772,18 @@ func RunMapper(req *pb.RestoreRequest, mapDir string) (*mapResult, error) {
 			case pb.DropOperation_ALL:
 				dropAll = true
 			case pb.DropOperation_DATA:
-				var ns uint64
-				if manifest.Version == 0 {
-					ns = x.GalaxyNamespace
-				} else {
-					var err error
-					ns, err = strconv.ParseUint(op.DropValue, 0, 64)
-					if err != nil {
-						return nil, errors.Wrap(err, "Map phase failed to parse namespace")
-					}
+				if op.DropValue == "" {
+					// In 2103, we do not support namespace level drop data.
+					dropAll = true
+					continue
+				}
+				ns, err := strconv.ParseUint(op.DropValue, 0, 64)
+				if err != nil {
+					return nil, errors.Wrap(err, "map phase failed to parse namespace")
 				}
 				dropNs[ns] = struct{}{}
 			case pb.DropOperation_ATTR:
-				p := op.DropValue
-				if manifest.Version == 0 {
-					p = x.NamespaceAttr(x.GalaxyNamespace, p)
-				}
-				dropAttr[p] = struct{}{}
+				dropAttr[op.DropValue] = struct{}{}
 			case pb.DropOperation_NS:
 				// pstore will be nil for export_backup tool. In that case we don't need to ban ns.
 				if pstore == nil {
@@ -714,6 +799,7 @@ func RunMapper(req *pb.RestoreRequest, mapDir string) (*mapResult, error) {
 				}
 				maxBannedNs = x.Max(maxBannedNs, ns)
 			}
+			glog.Infof("[MAP] Processed manifest %d\n", manifest.BackupNum)
 		}
 	} // done with all the manifests.
 
@@ -726,8 +812,11 @@ func RunMapper(req *pb.RestoreRequest, mapDir string) (*mapResult, error) {
 		return nil, errors.Wrap(err, "failed to flush the mapper")
 	}
 	mapRes := &mapResult{
-		maxUid: mapper.maxUid,
-		maxNs:  mapper.maxNs,
+		maxUid:        mapper.maxUid,
+		maxNs:         mapper.maxNs,
+		shouldDropAll: dropAll,
+		dropAttr:      dropAttr,
+		dropNs:        dropNs,
 	}
 	// update the maxNsId considering banned namespaces.
 	mapRes.maxNs = x.Max(mapRes.maxNs, maxBannedNs)

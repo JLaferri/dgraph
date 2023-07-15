@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 
+//nolint:lll
 package resolve
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 
@@ -29,7 +30,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"gopkg.in/yaml.v2"
 
-	dgoapi "github.com/dgraph-io/dgo/v210/protos/api"
+	dgoapi "github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/dql"
 	"github.com/dgraph-io/dgraph/graphql/authorization"
 	"github.com/dgraph-io/dgraph/graphql/dgraph"
@@ -117,8 +118,7 @@ func (ex *authExecutor) Execute(ctx context.Context, req *dgoapi.Request,
 		// mutation to create new nodes
 		var assigned map[string]string
 		if ex.uids != "" {
-			err := json.Unmarshal([]byte(ex.uids), &assigned)
-			require.NoError(ex.t, err)
+			require.NoError(ex.t, json.Unmarshal([]byte(ex.uids), &assigned))
 		}
 
 		// Check query generated along with mutation.
@@ -170,7 +170,7 @@ func (ex *authExecutor) CommitOrAbort(ctx context.Context,
 }
 
 func TestStringCustomClaim(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 
 	authSchema, err := testutil.AppendAuthInfo(sch, jwt.SigningMethodHS256.Name, "", false)
@@ -206,7 +206,7 @@ func TestStringCustomClaim(t *testing.T) {
 }
 
 func TestAudienceClaim(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 
 	authSchema, err := testutil.AppendAuthInfo(sch, jwt.SigningMethodHS256.Name, "", false)
@@ -259,7 +259,7 @@ func TestAudienceClaim(t *testing.T) {
 }
 
 func TestInvalidAuthInfo(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 	authSchema, err := testutil.AppendJWKAndVerificationKey(sch)
 	require.NoError(t, err)
@@ -268,7 +268,7 @@ func TestInvalidAuthInfo(t *testing.T) {
 }
 
 func TestMissingAudienceWithJWKUrl(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 	authSchema, err := testutil.AppendAuthInfoWithJWKUrlAndWithoutAudience(sch)
 	require.NoError(t, err)
@@ -277,7 +277,7 @@ func TestMissingAudienceWithJWKUrl(t *testing.T) {
 }
 
 func TestVerificationWithJWKUrl(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 
 	authSchema, err := testutil.AppendAuthInfoWithJWKUrl(sch)
@@ -307,11 +307,11 @@ func TestVerificationWithJWKUrl(t *testing.T) {
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
 	_, err = metainfo.ExtractCustomClaims(ctx)
-	require.Nil(t, err)
+	require.NoError(t, err)
 }
 
 func TestVerificationWithMultipleJWKUrls(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 
 	authSchema, err := testutil.AppendAuthInfoWithMultipleJWKUrls(sch)
@@ -327,7 +327,10 @@ func TestVerificationWithMultipleJWKUrls(t *testing.T) {
 	require.Equal(t, metainfo.Namespace, "https://xyz.io/jwt/claims")
 	require.Equal(t, metainfo.VerificationKey, "")
 	require.Equal(t, metainfo.JWKUrl, "")
-	require.Equal(t, metainfo.JWKUrls, []string{"https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com", "https://dev-hr2kugfp.us.auth0.com/.well-known/jwks.json"})
+	require.Equal(t, metainfo.JWKUrls,
+		[]string{"https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com",
+			"https://dev-hr2kugfp.us.auth0.com/.well-known/jwks.json"},
+	)
 
 	testCases := []struct {
 		name    string
@@ -353,9 +356,10 @@ func TestVerificationWithMultipleJWKUrls(t *testing.T) {
 
 			_, err := metainfo.ExtractCustomClaims(ctx)
 			if tcase.invalid {
-				require.True(t, strings.Contains(err.Error(), "unable to parse jwt token:token is unverifiable: Keyfunc returned an error"))
+				require.True(t, strings.Contains(err.Error(),
+					"unable to parse jwt token:token is unverifiable: Keyfunc returned an error"))
 			} else {
-				require.Nil(t, err)
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -363,7 +367,7 @@ func TestVerificationWithMultipleJWKUrls(t *testing.T) {
 
 // TODO(arijit): Generate the JWT token instead of using pre generated token.
 func TestJWTExpiry(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 
 	authSchema, err := testutil.AppendAuthInfo(sch, jwt.SigningMethodHS256.Name, "", false)
@@ -447,7 +451,7 @@ func queryRewriting(t *testing.T, sch string, authMeta *testutil.AuthMeta, b []b
 				require.Equal(t, err.Error(), tcase.Error.Error())
 				require.Nil(t, dgQuery)
 			} else {
-				require.Nil(t, err)
+				require.NoError(t, err)
 				require.Equal(t, tcase.DGQuery, dgraph.AsString(dgQuery))
 			}
 			// Check for unused variables.
@@ -586,14 +590,14 @@ func mutationQueryRewriting(t *testing.T, sch string, authMeta *testutil.AuthMet
 
 			_, _, _ = rewriter.RewriteQueries(context.Background(), gqlMutation)
 			_, err = rewriter.Rewrite(ctx, gqlMutation, tt.idExistence)
-			require.Nil(t, err)
+			require.NoError(t, err)
 
 			// -- Act --
 			dgQuery, err := rewriter.FromMutationResult(
 				ctx, gqlMutation, tt.assigned, tt.result)
 
 			// -- Assert --
-			require.Nil(t, err)
+			require.NoError(t, err)
 			require.Equal(t, tt.dgQuery, dgraph.AsString(dgQuery))
 
 			// Check for unused variables.
@@ -633,8 +637,7 @@ func deleteQueryRewriting(t *testing.T, sch string, authMeta *testutil.AuthMeta,
 			// -- Arrange --
 			var vars map[string]interface{}
 			if tcase.Variables != "" {
-				err := json.Unmarshal([]byte(tcase.Variables), &vars)
-				require.NoError(t, err)
+				require.NoError(t, json.Unmarshal([]byte(tcase.Variables), &vars))
 			}
 
 			op, err := gqlSchema.Operation(
@@ -744,8 +747,7 @@ func checkAddUpdateCase(
 	// -- Arrange --
 	var vars map[string]interface{}
 	if tcase.Variables != "" {
-		err := json.Unmarshal([]byte(tcase.Variables), &vars)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.Variables), &vars))
 	}
 
 	op, err := gqlSchema.Operation(
@@ -796,7 +798,7 @@ func checkAddUpdateCase(
 }
 
 func TestAuthQueryRewriting(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 
 	jwtAlgo := []string{jwt.SigningMethodHS256.Name, jwt.SigningMethodRS256.Name}
@@ -843,7 +845,7 @@ func TestAuthQueryRewriting(t *testing.T) {
 }
 
 func TestAuthQueryRewritingWithDefaultClosedByFlag(t *testing.T) {
-	sch, err := ioutil.ReadFile("../e2e/auth/schema.graphql")
+	sch, err := os.ReadFile("../e2e/auth/schema.graphql")
 	require.NoError(t, err, "Unable to read schema file")
 	algo := jwt.SigningMethodHS256.Name
 	result, err := testutil.AppendAuthInfo(sch, algo, "../e2e/auth/sample_public_key.pem", true)
@@ -882,7 +884,7 @@ func TestAuthQueryRewritingWithDefaultClosedByFlag(t *testing.T) {
 }
 
 func read(t *testing.T, file string) []byte {
-	b, err := ioutil.ReadFile(file)
+	b, err := os.ReadFile(file)
 	require.NoError(t, err, "Unable to read test file")
 	return b
 }

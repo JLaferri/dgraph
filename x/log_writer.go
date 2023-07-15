@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,20 +19,19 @@ package x
 import (
 	"bufio"
 	"compress/gzip"
-	"crypto/aes"
-	"crypto/cipher"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/dgraph-io/badger/v3/y"
+	"github.com/golang/glog"
+
+	"github.com/dgraph-io/badger/v4/y"
 	"github.com/dgraph-io/ristretto/z"
 )
 
@@ -40,7 +39,9 @@ const (
 	backupTimeFormat = "2006-01-02T15-04-05.000"
 	bufferSize       = 256 * 1024
 	flushInterval    = 10 * time.Second
-	VerificationText = "Hello World"
+	//  old logs before https://github.com/dgraph-io/dgraph/pull/8323 contain deprecated verification text in header
+	VerificationTextDeprecated = "Hello World"
+	VerificationText           = "dlroW olloH"
 )
 
 // This is done to ensure LogWriter always implement io.WriterCloser
@@ -53,7 +54,6 @@ type LogWriter struct {
 	Compress      bool
 	EncryptionKey []byte
 
-	baseIv      [12]byte
 	mu          sync.Mutex
 	size        int64
 	file        *os.File
@@ -106,13 +106,27 @@ func (l *LogWriter) Write(p []byte) (int, error) {
 		}
 	}
 
-	// if encryption is enabled store the data in encyrpted way
+	// if encryption is enabled store the data in encrypted way
+	// encrypted writes will be preceded by the following header
+	// #################################################################
+	// #####   [16]byte iv + [4]byte uint32(len(p)) + [:]byte p    #####
+	// #################################################################
 	if l.EncryptionKey != nil {
-		bytes, err := encrypt(l.EncryptionKey, l.baseIv, p)
+		iv := make([]byte, 16)
+		if _, err := rand.Read(iv); err != nil {
+			return 0, err
+		}
+
+		lengthHeader := make([]byte, 4)
+		binary.BigEndian.PutUint32(lengthHeader, uint32(len(p)))
+
+		cipherText, err := encrypt(l.EncryptionKey, iv, p)
 		if err != nil {
 			return 0, err
 		}
-		n, err := l.writer.Write(bytes)
+
+		allocation := append(append(iv, lengthHeader...), cipherText...)
+		n, err := l.writer.Write(allocation)
 		l.size = l.size + int64(n)
 		return n, err
 	}
@@ -171,29 +185,26 @@ func (l *LogWriter) flush() {
 	_ = l.file.Sync()
 }
 
-func encrypt(key []byte, baseIv [12]byte, src []byte) ([]byte, error) {
-	iv := make([]byte, 16)
-	copy(iv, baseIv[:])
-	binary.BigEndian.PutUint32(iv[12:], uint32(len(src)))
-	allocate, err := y.XORBlockAllocate(src, key, iv)
+func encrypt(key, iv, src []byte) ([]byte, error) {
+	ivCopy := make([]byte, 16)
+	copy(ivCopy, iv[:])
+	cipher, err := y.XORBlockAllocate(src, key, ivCopy)
 	if err != nil {
 		return nil, err
 	}
-	allocate = append(iv[12:], allocate...)
-	return allocate, nil
+	return cipher, nil
 }
 
-func decrypt(key []byte, baseIv [12]byte, src []byte) ([]byte, error) {
-	iv := make([]byte, 16)
-	copy(iv, baseIv[:])
-	binary.BigEndian.PutUint32(iv[12:], uint32(len(src)))
-	block, err := aes.NewCipher(key)
+// used to verify client has correct key and can decrypt audit log header
+func decrypt(key, iv, src []byte) ([]byte, error) {
+	ivCopy := make([]byte, 16)
+	copy(ivCopy, iv[:]) // todo: do we need to copy here?
+
+	plainText, err := y.XORBlockAllocate(src, key, ivCopy)
 	if err != nil {
 		return nil, err
 	}
-	stream := cipher.NewCTR(block, iv[:])
-	stream.XORKeyStream(src, src)
-	return src, nil
+	return plainText, nil
 }
 
 func (l *LogWriter) rotate() error {
@@ -244,12 +255,19 @@ func (l *LogWriter) open() error {
 		l.writer = bufio.NewWriterSize(l.file, bufferSize)
 
 		if l.EncryptionKey != nil {
-			rand.Read(l.baseIv[:]) //nolint:gosec // cryptographic precision not required for randomly selecting from slice
-			bytes, err := encrypt(l.EncryptionKey, l.baseIv, []byte(VerificationText))
+			iv := make([]byte, 16)
+			if _, err := rand.Read(iv); err != nil { // cve fix is here
+				return err
+			}
+			lengthInput := make([]byte, 4)
+			binary.BigEndian.PutUint32(lengthInput, uint32(len(VerificationText))) // header has 16+4 bytes now
+
+			bytes, err := encrypt(l.EncryptionKey, iv, []byte(VerificationText))
 			if err != nil {
 				return err
 			}
-			if _, err = l.writer.Write(append(l.baseIv[:], bytes[:]...)); err != nil {
+			cipher := append(append(iv, lengthInput...), bytes...)
+			if _, err = l.writer.Write(cipher); err != nil {
 				return err
 			}
 		}
@@ -274,19 +292,22 @@ func (l *LogWriter) open() error {
 
 	l.file = f
 	if l.EncryptionKey != nil {
-		// If not able to read the baseIv, then this file might be corrupted.
+		// initialize byte slice for iv
+		iv := make([]byte, 16)
+		// If not able to read the iv, then this file might be corrupted.
 		// open the new file in that case
-		if _, err = l.file.ReadAt(l.baseIv[:], 0); err != nil {
+		if _, err = l.file.ReadAt(iv, 0); err != nil {
 			_ = l.file.Close()
 			return openNew()
 		}
-		text := make([]byte, 11)
-		if _, err := f.ReadAt(text, 16); err != nil {
+		ct := make([]byte, len(VerificationText)) // size=11
+		// veritification text starts at offset 20
+		if _, err := f.ReadAt(ct, 20); err != nil {
 			_ = f.Close()
 			return openNew()
 		}
-		if t, err := decrypt(l.EncryptionKey, l.baseIv, text); err != nil ||
-			string(t) != VerificationText {
+		t, err := decrypt(l.EncryptionKey, iv, ct)
+		if err != nil || string(t) != VerificationText {
 			// different encryption key. Better to open new file here
 			_ = f.Close()
 			return openNew()
@@ -311,27 +332,39 @@ func compress(src string) error {
 		return err
 	}
 
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			glog.Warningf("error while closing fd: %v", err)
+		}
+	}()
 	gzf, err := os.OpenFile(src+".gz", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.ModePerm)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := gzf.Close(); err != nil {
+			glog.Warningf("error closing file: %v", err)
+		}
+	}()
 
-	defer gzf.Close()
 	gz := gzip.NewWriter(gzf)
-	defer gz.Close()
+	defer func() {
+		if err := gz.Close(); err != nil {
+			glog.Warningf("error closing gzip writer: %v", err)
+		}
+	}()
+
 	if _, err := io.Copy(gz, f); err != nil {
-		os.Remove(src + ".gz")
+		if err := os.Remove(src + ".gz"); err != nil {
+			glog.Warningf("error deleting file [%v]: %v", src, err)
+		}
 		return err
 	}
 	// close the descriptors because we need to delete the file
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := os.Remove(src); err != nil {
-		return err
-	}
-	return nil
+	return os.Remove(src)
 }
 
 // this should be called in a serial order
@@ -383,7 +416,7 @@ func prefixAndExt(file string) (prefix, ext string) {
 
 func processOldLogFiles(fp string, maxAge int64) ([]string, []string, error) {
 	dir := filepath.Dir(fp)
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("can't read log file directory: %s", err)
 	}
@@ -399,7 +432,7 @@ func processOldLogFiles(fp string, maxAge int64) ([]string, []string, error) {
 
 	for _, f := range files {
 		if f.IsDir() || // f is directory
-			!strings.HasPrefix(f.Name(), defPrefix) || // f doesnt start with prefix
+			!strings.HasPrefix(f.Name(), defPrefix) || // f doesn't start with prefix
 			!(strings.HasSuffix(f.Name(), defExt) || strings.HasSuffix(f.Name(), defExt+".gz")) {
 			continue
 		}

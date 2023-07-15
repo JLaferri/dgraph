@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,8 +28,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210"
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/testutil"
 	"github.com/dgraph-io/dgraph/x"
 )
@@ -40,7 +42,7 @@ type QueryResult struct {
 
 func splitPreds(ps []string) []string {
 	for i, p := range ps {
-		ps[i] = x.ParseAttr(strings.Split(p, "-")[1])
+		ps[i] = x.ParseAttr(strings.SplitN(p, "-", 2)[1])
 	}
 
 	return ps
@@ -2774,7 +2776,7 @@ func TestUpsertMultiValueJson(t *testing.T) {
 	// delete color for employess of company1 and set color for employees of company2
 	m3 := `
 {
-  "query": "{user1(func: eq(works_for, \"company1\")) {c1 as uid} user2(func: eq(works_for, \"company2\")) {c2 as uid}}",
+  "query": "{u1(func: eq(works_for, \"company1\")) {c1 as uid} u2(func: eq(works_for, \"company2\")) {c2 as uid}}",
   "mutations": [
     {
       "delete": [
@@ -2800,8 +2802,8 @@ func TestUpsertMultiValueJson(t *testing.T) {
 	require.NoError(t, err)
 	result = QueryResult{}
 	require.NoError(t, json.Unmarshal(mr.data, &result))
-	require.Equal(t, 2, len(result.Queries["user1"]))
-	require.Equal(t, 2, len(result.Queries["user2"]))
+	require.Equal(t, 2, len(result.Queries["u1"]))
+	require.Equal(t, 2, len(result.Queries["u2"]))
 }
 
 func TestValVarWithBlankNode(t *testing.T) {
@@ -2866,7 +2868,7 @@ upsert {
 
 // This test may fail sometimes because ACL token
 // can get expired while the mutations is running.
-func upsertTooBigTest(t *testing.T) {
+func upsertTooBigTest(t *testing.T) { //nolint:unused
 	require.NoError(t, dropAll())
 
 	for i := 0; i < 1e6+1; {

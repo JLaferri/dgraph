@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -40,6 +39,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
+	"github.com/golang/glog"
 	"github.com/spf13/pflag"
 	"golang.org/x/tools/go/packages"
 
@@ -109,6 +109,7 @@ func commandWithContext(ctx context.Context, args ...string) *exec.Cmd {
 	}
 	if runtime.GOARCH == "arm64" {
 		cmd.Env = append(cmd.Env, "MINIO_IMAGE_ARCH=RELEASE.2020-11-13T20-10-18Z-arm64")
+		cmd.Env = append(cmd.Env, "NFS_SERVER_IMAGE_ARCH=11-arm")
 	}
 
 	return cmd
@@ -167,8 +168,13 @@ func detectRace(prefix string) bool {
 }
 
 func outputLogs(prefix string) {
-	f, err := ioutil.TempFile(".", prefix+"*.log")
+	f, err := os.CreateTemp(".", prefix+"*.log")
 	x.Check(err)
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Printf("error closing file: %v", err)
+		}
+	}()
 	printLogs := func(container string) {
 		in := testutil.GetContainerInstance(prefix, container)
 		c := in.GetContainer()
@@ -178,7 +184,9 @@ func outputLogs(prefix string) {
 		logCmd := exec.Command("docker", "logs", c.ID)
 		out, err := logCmd.CombinedOutput()
 		x.Check(err)
-		f.Write(out)
+		if _, err := f.Write(out); err != nil {
+			fmt.Printf("error writing container logs to file: %v", err)
+		}
 		fmt.Printf("Docker logs for %s is %s with error %+v ", c.ID, string(out), err)
 	}
 	for i := 0; i <= 3; i++ {
@@ -188,8 +196,6 @@ func outputLogs(prefix string) {
 	for i := 0; i <= 6; i++ {
 		printLogs("alpha" + strconv.Itoa(i))
 	}
-	f.Sync()
-	f.Close()
 	s := fmt.Sprintf("---> LOGS for %s written to %s .\n", prefix, f.Name())
 	_, err = oc.Write([]byte(s))
 	x.Check(err)
@@ -216,24 +222,29 @@ func stopCluster(composeFile, prefix string, wg *sync.WaitGroup, err error) {
 				tmp := fmt.Sprintf("%s.%s", tmpCoverageFile, c.ID)
 
 				containerInfo, err := testutil.DockerInspect(c.ID)
+				if err != nil {
+					fmt.Printf("error while inspecting container. Prefix: %s. Error: %v\n", prefix, err)
+				}
+
 				workDir := containerInfo.Config.WorkingDir
 
 				err = testutil.DockerCpFromContainer(c.ID, workDir+"/coverage.out", tmp)
 				if err != nil {
-					fmt.Printf("Error while bringing down cluster. Failed at copying coverage file. Prefix: %s. Error: %v\n",
+					fmt.Printf("error bringing down cluster. Failed at copying coverage file. Prefix: %s. Error: %v\n",
 						prefix, err)
 				}
 
 				if err = appendTestCoverageFile(tmp, coverageFile); err != nil {
-					fmt.Printf("Error while bringing down cluster. Failed at appending coverage file. Prefix: %s. Error: %v\n",
-						prefix, err)
+					fmt.Printf("error bringing down cluster. Failed at appending coverage file. Prefix: %s. Error: %v\n",
+						prefix, err,
+					)
 				}
 
-				os.Remove(tmp)
+				_ = os.Remove(tmp)
 
 				coverageBulk := strings.Replace(composeFile, "docker-compose.yml", "coverage_bulk.out", -1)
 				if err = appendTestCoverageFile(coverageBulk, coverageFile); err != nil {
-					fmt.Printf("Error while bringing down cluster. Failed at appending coverage file. Prefix: %s. Error: %v\n",
+					fmt.Printf("Error bringing down cluster. Failed at appending coverage file. Prefix: %s. Error: %v\n",
 						prefix, err)
 				}
 			}
@@ -252,7 +263,7 @@ func stopCluster(composeFile, prefix string, wg *sync.WaitGroup, err error) {
 }
 
 func runTestsFor(ctx context.Context, pkg, prefix string) error {
-	var args = []string{"go", "test", "-failfast", "-v"}
+	var args = []string{"go", "test", "-failfast", "-v", "-tags=integration"}
 	if *race {
 		args = append(args, "-timeout", "180m")
 		// Todo: There are few race errors in tests itself. Enable this once that is fixed.
@@ -279,7 +290,7 @@ func runTestsFor(ctx context.Context, pkg, prefix string) error {
 	cmd.Env = append(cmd.Env, "TEST_DOCKER_PREFIX="+prefix)
 	abs, err := filepath.Abs(*tmp)
 	if err != nil {
-		return fmt.Errorf("while getting absolute path of tmp directory: %v Error: %v\n", *tmp, err)
+		return fmt.Errorf("while getting absolute path of tmp directory: %v Error: %v", *tmp, err)
 	}
 	cmd.Env = append(cmd.Env, "TEST_DATA_DIRECTORY="+abs)
 	// Use failureCatcher.
@@ -292,12 +303,12 @@ func runTestsFor(ctx context.Context, pkg, prefix string) error {
 		time.Sleep(time.Second)
 	} else {
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("While running command: %v Error: %v", args, err)
+			return fmt.Errorf("while running command: %v, error: %v", args, err)
 		}
 	}
 
 	dur := time.Since(start).Round(time.Second)
-	tid, _ := ctx.Value("threadId").(int32)
+	tid, _ := ctx.Value(_threadIdKey{}).(int32)
 	oc.Took(tid, pkg, dur)
 	fmt.Printf("Ran tests for package: %s in %s\n", pkg, dur)
 	if *runCoverage {
@@ -317,7 +328,7 @@ func hasTestFiles(pkg string) bool {
 	dir = filepath.Join(*baseDir, dir)
 
 	hasTests := false
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if hasTests {
 			return filepath.SkipDir
 		}
@@ -327,8 +338,11 @@ func hasTestFiles(pkg string) bool {
 		}
 		return nil
 	})
+	x.Check(err)
 	return hasTests
 }
+
+type _threadIdKey struct{}
 
 var _threadId int32
 
@@ -375,7 +389,7 @@ func runTests(taskCh chan task, closer *z.Closer) error {
 	defer stop()
 
 	ctx := closer.Ctx()
-	ctx = context.WithValue(ctx, "threadId", threadId)
+	ctx = context.WithValue(ctx, _threadIdKey{}, threadId)
 
 	for task := range taskCh {
 		if ctx.Err() != nil {
@@ -491,8 +505,8 @@ func (o *outputCatcher) Write(p []byte) (n int, err error) {
 	o.Lock()
 	defer o.Unlock()
 
-	if bytes.Index(p, []byte("FAIL")) >= 0 ||
-		bytes.Index(p, []byte("TODO")) >= 0 {
+	if bytes.Contains(p, []byte("FAIL")) ||
+		bytes.Contains(p, []byte("TODO")) {
 		o.failure.Write(p)
 	}
 	return os.Stdout.Write(p)
@@ -570,8 +584,9 @@ func getPackages() []task {
 		}
 		return out
 	}
+	cfg := &packages.Config{BuildFlags: []string{"-tags=integration"}}
 
-	pkgs, err := packages.Load(nil, *baseDir+"/...")
+	pkgs, err := packages.Load(cfg, *baseDir+"/...")
 	x.Check(err)
 	for _, pkg := range pkgs {
 		if len(pkg.Errors) > 0 {
@@ -776,17 +791,13 @@ func downloadDataFiles() {
 		fmt.Print("Skipping downloading of resources\n")
 		return
 	}
-	if *tmp == "" {
-		*tmp = os.TempDir()
-	}
-	x.Check(testutil.MakeDirEmpty([]string{*tmp}))
 	for fname, link := range datafiles {
 		cmd := exec.Command("wget", "-O", fname, link)
 		cmd.Dir = *tmp
 
 		if out, err := cmd.CombinedOutput(); err != nil {
-			fmt.Printf("Error %v", err)
-			fmt.Printf("Output %v", out)
+			fmt.Printf("Error %v\n", err)
+			panic(fmt.Sprintf("error downloading a file: %s", string(out)))
 		}
 	}
 }
@@ -796,11 +807,6 @@ func downloadLDBCFiles() {
 		fmt.Print("Skipping downloading of resources\n")
 		return
 	}
-	if *tmp == "" {
-		*tmp = os.TempDir() + "/ldbcData"
-	}
-
-	x.Check(testutil.MakeDirEmpty([]string{*tmp}))
 
 	for _, name := range rdfFileNames {
 		filepath := baseUrl + name + suffix
@@ -817,15 +823,14 @@ func downloadLDBCFiles() {
 			cmd := exec.Command("wget", "-O", fname, link)
 			cmd.Dir = *tmp
 			if out, err := cmd.CombinedOutput(); err != nil {
-				fmt.Printf("Error %v", err)
-				fmt.Printf("Output %v", out)
+				fmt.Printf("Error %v\n", err)
+				panic(fmt.Sprintf("error downloading a file: %s", string(out)))
 			}
 			fmt.Printf("Downloaded %s to %s in %s \n", fname, *tmp, time.Since(start))
 		}(fname, link, &wg)
 	}
 	wg.Wait()
 	fmt.Printf("Downloaded %d files in %s \n", len(ldbcDataFiles), time.Since(start))
-
 }
 
 func createTestCoverageFile(path string) error {
@@ -833,7 +838,11 @@ func createTestCoverageFile(path string) error {
 	if err != nil {
 		return err
 	}
-	defer outFile.Close()
+	defer func() {
+		if err := outFile.Close(); err != nil {
+			glog.Warningf("error closing file: %v", err)
+		}
+	}()
 
 	cmd := command("echo", coverageFileHeader)
 	cmd.Stdout = outFile
@@ -859,7 +868,11 @@ func isTestCoverageEmpty(path string) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			glog.Warningf("error closing file: %v", err)
+		}
+	}()
 
 	var l int
 	scanner := bufio.NewScanner(file)
@@ -938,7 +951,7 @@ func run() error {
 		oc.Took(0, "COMPILE", time.Since(start))
 	}
 
-	tmpDir, err := ioutil.TempDir("", "dgraph-test")
+	tmpDir, err := os.MkdirTemp("", "dgraph-test")
 	x.Check(err)
 	defer os.RemoveAll(tmpDir)
 
@@ -981,10 +994,19 @@ func run() error {
 	go func() {
 		defer close(testCh)
 		valid := getPackages()
+
 		if testSuiteContains("load") || testSuiteContains("all") {
+			if *tmp == "" {
+				*tmp = os.TempDir()
+			}
+			x.Check(testutil.MakeDirEmpty([]string{*tmp}))
 			downloadDataFiles()
 		}
 		if testSuiteContains("ldbc") || testSuiteContains("all") {
+			if *tmp == "" {
+				*tmp = filepath.Join(os.TempDir(), "/ldbcdata")
+			}
+			x.Check(testutil.MakeDirEmpty([]string{*tmp}))
 			downloadLDBCFiles()
 		}
 		for i, task := range valid {

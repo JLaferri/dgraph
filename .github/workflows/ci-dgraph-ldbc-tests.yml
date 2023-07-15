@@ -1,8 +1,27 @@
 name: ci-dgraph-ldbc-tests
 on:
   push:
+    paths-ignore:
+      - '.github/CODEOWNERS'
+      - '.vscode/**'
+      - 'compose/**'
+      - 'contrib/systemd/**'
+      - 'licenses/**'
+      - 'paper/**'
+      - 'present/**'
+      - 'RFC/**'
+      - 'static/**'
+      - 'wiki/**'
+      - '**/**.dockerignore'
+      - '**/**.gitignore'
+      - '**/**.md'
+      - '**/**.png'
+      - '**/**.jpg'
+      - '**/**.gif'
+      - '**/**.ini'
     branches:
       - main
+      - 'release/**'
   pull_request:
     types:
       - opened
@@ -11,10 +30,12 @@ on:
       - ready_for_review
     branches:
       - main
+      - 'release/**'
   schedule:
     - cron: "0 0 * * *" # 1-run per day
 jobs:
   dgraph-ldbc-tests:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout Dgraph
@@ -60,7 +81,7 @@ jobs:
           # go env settings
           export GOPATH=~/go
           # move the binary
-          cp dgraph/dgraph ~/go/bin/dgraph 
+          cp dgraph/dgraph ~/go/bin/dgraph
           # run the ldbc tests
           cd t; ./t --suite=ldbc
           # clean up docker containers after test execution

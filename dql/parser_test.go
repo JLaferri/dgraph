@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2015-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,18 @@
  * limitations under the License.
  */
 
+//nolint:lll
 package dql
 
 import (
 	"bytes"
-	"os"
 	"runtime/debug"
 	"testing"
 
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/chunker"
 	"github.com/dgraph-io/dgraph/lex"
 )
@@ -2378,7 +2378,8 @@ func TestParseFilter_opNot2(t *testing.T) {
 	require.NotNil(t, res.Query[0])
 	require.Equal(t, []string{"friends", "gender", "age", "hometown"}, childAttrs(res.Query[0]))
 	require.Equal(t, []string{"name"}, childAttrs(res.Query[0].Children[0]))
-	require.Equal(t, `(AND (NOT (OR (a aa "aaa") (b bb "bbb"))) (c cc "ccc"))`, res.Query[0].Children[0].Filter.debugString())
+	require.Equal(t, `(AND (NOT (OR (a aa "aaa") (b bb "bbb"))) (c cc "ccc"))`,
+		res.Query[0].Children[0].Filter.debugString())
 }
 
 // Test operator precedence. Let brackets make or evaluates before and.
@@ -2421,9 +2422,11 @@ func TestParseFilter_brac(t *testing.T) {
 	require.NotNil(t, res.Query[0])
 	require.Equal(t, []string{"friends", "gender", "age", "hometown"}, childAttrs(res.Query[0]))
 	require.Equal(t, []string{"name"}, childAttrs(res.Query[0].Children[0]))
-	require.Equal(t,
+	require.Equal(
+		t,
 		`(OR (a name "hello") (AND (AND (b name "world" "is") (OR (c aa "aaa") (OR (d dd "haha") (e ee "aaa")))) (f ff "aaa")))`,
-		res.Query[0].Children[0].Filter.debugString())
+		res.Query[0].Children[0].Filter.debugString(),
+	)
 }
 
 // Test if unbalanced brac will lead to errors.
@@ -2479,7 +2482,11 @@ func TestParseFilter_Geo2(t *testing.T) {
 `
 	resp, err := Parse(Request{Str: query})
 	require.NoError(t, err)
-	require.Equal(t, "[[11.2,-2.234],[-31.23,4.3214],[5.312,6.53]]", resp.Query[0].Children[0].Filter.Func.Args[0].Value)
+	require.Equal(
+		t,
+		"[[11.2,-2.234],[-31.23,4.3214],[5.312,6.53]]",
+		resp.Query[0].Children[0].Filter.Func.Args[0].Value,
+	)
 }
 
 func TestParseFilter_Geo3(t *testing.T) {
@@ -4012,7 +4019,7 @@ func TestParseRegexp6(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	os.Exit(m.Run())
+	m.Run()
 }
 
 func TestCountAtRoot(t *testing.T) {
@@ -4234,11 +4241,12 @@ func TestParserFuzz(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			defer func() {
 				if r := recover(); r != nil {
-					t.Errorf("parser panic caused by test: '%s', input: '%s': %v\n%s", test.name, test.in, r, debug.Stack())
+					t.Errorf("parser panic caused by test: '%s', input: '%s': %v\n%s", test.name,
+						test.in, r, debug.Stack())
 				}
 			}()
 
-			Parse(Request{Str: test.in})
+			_, _ = Parse(Request{Str: test.in})
 		})
 	}
 }
@@ -5332,6 +5340,24 @@ func TestFilterWithDollarError(t *testing.T) {
 		Str: query,
 	})
 	require.Error(t, err)
+}
+
+func TestFilterWithEqAndLenInWrongOrderArgs(t *testing.T) {
+	query := `
+	{
+		var(func: has(school), first: 3) {
+			f as uid
+		}
+
+		me(func: uid(f)) @filter(eq(3, len(f))) {
+			count(uid)
+		}
+	}`
+	_, err := Parse(Request{
+		Str: query,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "incorrect order, the first argument should be len function")
 }
 
 func TestFilterWithVar(t *testing.T) {

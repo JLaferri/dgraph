@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,17 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"testing"
 
+	"github.com/golang/glog"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210"
+	"github.com/dgraph-io/dgo/v230"
 )
 
 const (
@@ -132,4 +136,49 @@ func VerifySchema(t *testing.T, dg *dgo.Dgraph, opts SchemaOptions) {
 	require.NoError(t, err)
 
 	CompareJSON(t, GetFullSchemaJSON(opts), string(resp.GetJson()))
+}
+
+func UpdateGQLSchema(t *testing.T, sockAddrHttp, schema string) {
+	query := `mutation updateGQLSchema($sch: String!) {
+		updateGQLSchema(input: { set: { schema: $sch }}) {
+			gqlSchema {
+				schema
+			}
+		}
+	}`
+	adminUrl := "http://" + sockAddrHttp + "/admin"
+
+	params := GraphQLParams{
+		Query: query,
+		Variables: map[string]interface{}{
+			"sch": schema,
+		},
+	}
+	b, err := json.Marshal(params)
+	require.NoError(t, err)
+	resp, err := http.Post(adminUrl, "application/json", bytes.NewBuffer(b))
+	require.NoError(t, err)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			glog.Warningf("error closing body: %v", err)
+		}
+	}()
+}
+
+func GetGQLSchema(t *testing.T, sockAddrHttp string) string {
+	query := `{getGQLSchema {schema}}`
+	params := GraphQLParams{Query: query}
+	b, err := json.Marshal(params)
+	adminUrl := "http://" + sockAddrHttp + "/admin"
+	require.NoError(t, err)
+	resp, err := http.Post(adminUrl, "application/json", bytes.NewBuffer(b))
+	require.NoError(t, err)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			glog.Warningf("error closing body: %v", err)
+		}
+	}()
+	var data interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&data))
+	return JsonGet(data, "data", "getGQLSchema", "schema").(string)
 }

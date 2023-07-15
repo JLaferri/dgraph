@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,8 +36,8 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 
-	"github.com/dgraph-io/badger/v3"
-	bpb "github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v4"
+	bpb "github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/dgraph/codec"
 	"github.com/dgraph-io/dgraph/ee"
 	"github.com/dgraph-io/dgraph/posting"
@@ -481,7 +481,8 @@ func rollupKey(db *badger.DB) {
 	alloc := z.NewAllocator(32<<20, "Debug.RollupKey")
 	defer alloc.Release()
 
-	kvs, err := pl.Rollup(alloc)
+	// Setting kvs at their original value as we can't give a new timestamp in debug mode.
+	kvs, err := pl.Rollup(alloc, math.MaxUint64)
 	x.Check(err)
 
 	wb := db.NewManagedWriteBatch()
@@ -667,7 +668,7 @@ func printKeys(db *badger.DB) {
 		return err
 	}
 	x.Check(stream.Orchestrate(context.Background()))
-	w.Flush()
+	x.Check(w.Flush())
 	fmt.Println()
 	fmt.Printf("Found %d keys\n", atomic.LoadUint64(&total))
 }

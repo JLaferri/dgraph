@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -29,8 +31,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210"
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/testutil"
 )
 
@@ -52,8 +54,7 @@ func TestSnapshot(t *testing.T) {
 	}))
 
 	t.Logf("Stopping alpha2.\n")
-	err = testutil.DockerRun("alpha2", testutil.Stop)
-	require.NoError(t, err)
+	require.NoError(t, testutil.DockerRun("alpha2", testutil.Stop))
 
 	// Update the name predicate to include an index.
 	require.NoError(t, dg1.Alter(context.Background(), &api.Operation{
@@ -77,11 +78,12 @@ func TestSnapshot(t *testing.T) {
 	snapshotTs = waitForSnapshot(t, snapshotTs)
 
 	t.Logf("Starting alpha2.\n")
-	err = testutil.DockerRun("alpha2", testutil.Start)
-	require.NoError(t, err)
+	require.NoError(t, testutil.DockerRun("alpha2", testutil.Start))
 
 	// Wait for the container to start.
-	time.Sleep(time.Second * 2)
+	if err := testutil.CheckHealthContainer(testutil.ContainerAddr("alpha2", 8080)); err != nil {
+		t.Fatalf("error while getting alpha container health: %v", err)
+	}
 	dg2, err := testutil.DgraphClient(testutil.ContainerAddr("alpha2", 9080))
 	if err != nil {
 		t.Fatalf("Error while getting a dgraph client: %v", err)
@@ -89,8 +91,7 @@ func TestSnapshot(t *testing.T) {
 	verifySnapshot(t, dg2, 200)
 
 	t.Logf("Stopping alpha2.\n")
-	err = testutil.DockerRun("alpha2", testutil.Stop)
-	require.NoError(t, err)
+	require.NoError(t, testutil.DockerRun("alpha2", testutil.Stop))
 
 	for i := 201; i <= 400; i++ {
 		err := testutil.RetryMutation(dg1, &api.Mutation{
@@ -99,17 +100,26 @@ func TestSnapshot(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
+	const testSchema = "type Person { name: String }"
+	// uploading new schema while alpha2 is not running so we can
+	// test whether the stopped alpha gets new schema in snapshot
+	testutil.UpdateGQLSchema(t, testutil.SockAddrHttp, testSchema)
 	_ = waitForSnapshot(t, snapshotTs)
 
 	t.Logf("Starting alpha2.\n")
-	err = testutil.DockerRun("alpha2", testutil.Start)
-	require.NoError(t, err)
+	require.NoError(t, testutil.DockerRun("alpha2", testutil.Start))
+	if err := testutil.CheckHealthContainer(testutil.ContainerAddr("alpha2", 8080)); err != nil {
+		t.Fatalf("error while getting alpha container health: %v", err)
+	}
 
 	dg2, err = testutil.DgraphClient(testutil.ContainerAddr("alpha2", 9080))
 	if err != nil {
 		t.Fatalf("Error while getting a dgraph client: %v", err)
 	}
 	verifySnapshot(t, dg2, 400)
+	resp := testutil.GetGQLSchema(t, testutil.ContainerAddr("alpha2", 8080))
+	// comparing uploaded graphql schema and schema acquired from stopped container
+	require.Equal(t, testSchema, resp)
 }
 
 func verifySnapshot(t *testing.T, dg *dgo.Dgraph, num int) {
@@ -125,8 +135,7 @@ func verifySnapshot(t *testing.T, dg *dgo.Dgraph, num int) {
 	resMap := make(map[string][]map[string]int)
 	resp, err := testutil.RetryQuery(dg, q1)
 	require.NoError(t, err)
-	err = json.Unmarshal(resp.Json, &resMap)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp.Json, &resMap))
 
 	sum := 0
 	require.Equal(t, num, len(resMap["values"]))
@@ -165,7 +174,7 @@ func waitForSnapshot(t *testing.T, prevSnapTs uint64) uint64 {
 	for {
 		res, err := http.Get("http://" + testutil.SockAddrZeroHttp + "/state")
 		require.NoError(t, err)
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
 		require.NoError(t, err)
 

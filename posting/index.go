@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2016-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"os"
 	"sync/atomic"
@@ -33,9 +32,9 @@ import (
 	ostats "go.opencensus.io/stats"
 	otrace "go.opencensus.io/trace"
 
-	"github.com/dgraph-io/badger/v3"
-	"github.com/dgraph-io/badger/v3/options"
-	bpb "github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/badger/v4/options"
+	bpb "github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/dgraph/protos/pb"
 	"github.com/dgraph-io/dgraph/schema"
 	"github.com/dgraph-io/dgraph/tok"
@@ -563,7 +562,7 @@ func (r *rebuilder) Run(ctx context.Context) error {
 
 	// We write the index in a temporary badger first and then,
 	// merge entries before writing them to p directory.
-	tmpIndexDir, err := ioutil.TempDir(x.WorkerConfig.TmpDir, "dgraph_index_")
+	tmpIndexDir, err := os.MkdirTemp(x.WorkerConfig.TmpDir, "dgraph_index_")
 	if err != nil {
 		return errors.Wrap(err, "error creating temp dir for reindexing")
 	}
@@ -592,7 +591,7 @@ func (r *rebuilder) Run(ctx context.Context) error {
 
 	glog.V(1).Infof(
 		"Rebuilding index for predicate %s: Starting process. StartTs=%d. Prefix=\n%s\n",
-		x.FormatNsAttr(r.attr), r.startTs, hex.Dump(r.prefix))
+		r.attr, r.startTs, hex.Dump(r.prefix))
 
 	// Counter is used here to ensure that all keys are committed at different timestamp.
 	// We set it to 1 in case there are no keys found and NewStreamAt is called with ts=0.
@@ -600,8 +599,7 @@ func (r *rebuilder) Run(ctx context.Context) error {
 
 	tmpWriter := tmpDB.NewManagedWriteBatch()
 	stream := pstore.NewStreamAt(r.startTs)
-	stream.LogPrefix = fmt.Sprintf("Rebuilding index for predicate %s (1/2):",
-		x.FormatNsAttr(r.attr))
+	stream.LogPrefix = fmt.Sprintf("Rebuilding index for predicate %s (1/2):", r.attr)
 	stream.Prefix = r.prefix
 	stream.KeyToList = func(key []byte, itr *badger.Iterator) (*bpb.KVList, error) {
 		// We should return quickly if the context is no longer valid.
@@ -663,21 +661,19 @@ func (r *rebuilder) Run(ctx context.Context) error {
 		return err
 	}
 	glog.V(1).Infof("Rebuilding index for predicate %s: building temp index took: %v\n",
-		x.FormatNsAttr(r.attr), time.Since(start))
+		r.attr, time.Since(start))
 
 	// Now we write all the created posting lists to disk.
-	glog.V(1).Infof("Rebuilding index for predicate %s: writing index to badger",
-		x.FormatNsAttr(r.attr))
+	glog.V(1).Infof("Rebuilding index for predicate %s: writing index to badger", r.attr)
 	start = time.Now()
 	defer func() {
 		glog.V(1).Infof("Rebuilding index for predicate %s: writing index took: %v\n",
-			x.FormatNsAttr(r.attr), time.Since(start))
+			r.attr, time.Since(start))
 	}()
 
 	writer := pstore.NewManagedWriteBatch()
 	tmpStream := tmpDB.NewStreamAt(counter)
-	tmpStream.LogPrefix = fmt.Sprintf("Rebuilding index for predicate %s (2/2):",
-		x.FormatNsAttr(r.attr))
+	tmpStream.LogPrefix = fmt.Sprintf("Rebuilding index for predicate %s (2/2):", r.attr)
 	tmpStream.KeyToList = func(key []byte, itr *badger.Iterator) (*bpb.KVList, error) {
 		l, err := ReadPostingList(key, itr)
 		if err != nil {
@@ -685,8 +681,9 @@ func (r *rebuilder) Run(ctx context.Context) error {
 		}
 		// No need to write a loop after ReadPostingList to skip unread entries
 		// for a given key because we only wrote BitDeltaPosting to temp badger.
-
-		kvs, err := l.Rollup(nil)
+		// We can write the data at their original timestamp in pstore badger.
+		// We do the rollup at MaxUint64 so that we don't change the timestamp of resulting list.
+		kvs, err := l.Rollup(nil, math.MaxUint64)
 		if err != nil {
 			return nil, err
 		}
@@ -720,8 +717,7 @@ func (r *rebuilder) Run(ctx context.Context) error {
 	if err := tmpStream.Orchestrate(ctx); err != nil {
 		return err
 	}
-	glog.V(1).Infof("Rebuilding index for predicate %s: Flushing all writes.\n",
-		x.FormatNsAttr(r.attr))
+	glog.V(1).Infof("Rebuilding index for predicate %s: Flushing all writes.\n", r.attr)
 	return writer.Flush()
 }
 

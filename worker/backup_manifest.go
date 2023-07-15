@@ -8,18 +8,20 @@
  * may not use this file except in compliance with the License. You
  * may obtain a copy of the License at
  *
- *     https://github.com/dgraph-io/dgraph/blob/master/licenses/DCL.txt
+ *     https://github.com/dgraph-io/dgraph/blob/main/licenses/DCL.txt
  */
 
 package worker
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/golang/glog"
 	"github.com/pkg/errors"
 
 	"github.com/dgraph-io/dgraph/protos/pb"
@@ -55,38 +57,28 @@ func verifyManifests(manifests []*Manifest) error {
 	return nil
 }
 
-func getManifestsToRestore(
-	h UriHandler, uri *url.URL, req *pb.RestoreRequest) ([]*Manifest, error) {
-
-	if !h.DirExists("") {
-		return nil, errors.Errorf("getManifestsToRestore: The uri path: %q doesn't exists",
-			uri.Path)
-	}
-	manifest, err := getConsolidatedManifest(h, uri)
+func getManifestsToRestore(h UriHandler, uri *url.URL, req *pb.RestoreRequest) ([]*Manifest, error) {
+	manifest, err := GetManifest(h, uri)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get consolidated manifest")
+		return nil, err
 	}
-	return getFilteredManifests(h, manifest.Manifests, req)
-}
-
-func getFilteredManifests(h UriHandler, manifests []*Manifest,
-	req *pb.RestoreRequest) ([]*Manifest, error) {
+	manifests := manifest.Manifests
 
 	// filter takes a list of manifests and returns the list of manifests
 	// that should be considered during a restore.
-	filter := func(manifests []*Manifest, backupId string) ([]*Manifest, error) {
+	filter := func(mfs []*Manifest, backupId string) ([]*Manifest, error) {
 		// Go through the files in reverse order and stop when the latest full backup is found.
 		var out []*Manifest
-		for i := len(manifests) - 1; i >= 0; i-- {
+		for i := len(mfs) - 1; i >= 0; i-- {
 			// If backupId is not empty, skip all the manifests that do not match the given
-			// backupId. If it's empty, do not skip any manifests as the default behavior is
+			// backupId. If it's empty, do not skip any mfs manifests the default behavior is
 			// to restore the latest series of backups.
-			if len(backupId) > 0 && manifests[i].BackupId != backupId {
+			if len(backupId) > 0 && mfs[i].BackupId != backupId {
 				continue
 			}
 
-			out = append(out, manifests[i])
-			if manifests[i].Type == "full" {
+			out = append(out, mfs[i])
+			if mfs[i].Type == "full" {
 				break
 			}
 		}
@@ -104,6 +96,8 @@ func getFilteredManifests(h UriHandler, manifests []*Manifest,
 		for g := range m.Groups {
 			path := filepath.Join(m.Path, backupName(m.ValidReadTs(), g))
 			if !h.FileExists(path) {
+				glog.Warningf("backup file [%v] missing for backupId [%v] and backupNum [%v]",
+					path, m.BackupId, m.BackupNum)
 				missingFiles = true
 				break
 			}
@@ -112,7 +106,8 @@ func getFilteredManifests(h UriHandler, manifests []*Manifest,
 			validManifests = append(validManifests, m)
 		}
 	}
-	manifests, err := filter(validManifests, req.BackupId)
+
+	manifests, err = filter(validManifests, req.BackupId)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +160,62 @@ func getConsolidatedManifest(h UriHandler, uri *url.URL) (*MasterManifest, error
 	return &MasterManifest{Manifests: mlist}, nil
 }
 
+// upgradeManifest updates the in-memory manifest from various versions to the latest version.
+// If the manifest version is 0 (dgraph version < v21.03), attach namespace to the predicates and
+// the drop data/attr operation.
+// If the manifest version is 2103, convert the format of predicate from <ns bytes>|<attr> to
+// <ns string>-<attr>. This is because of a bug for namespace greater than 127.
+// See https://github.com/dgraph-io/dgraph/pull/7810
+// NOTE: Do not use the upgraded manifest to overwrite the non-upgraded manifest.
+func upgradeManifest(m *Manifest) error {
+	switch m.Version {
+	case 0:
+		for gid, preds := range m.Groups {
+			parsedPreds := preds[:0]
+			for _, pred := range preds {
+				parsedPreds = append(parsedPreds, x.GalaxyAttr(pred))
+			}
+			m.Groups[gid] = parsedPreds
+		}
+		for _, op := range m.DropOperations {
+			switch op.DropOp {
+			case pb.DropOperation_DATA:
+				op.DropValue = fmt.Sprintf("%#x", x.GalaxyNamespace)
+			case pb.DropOperation_ATTR:
+				op.DropValue = x.GalaxyAttr(op.DropValue)
+			default:
+				// do nothing for drop all and drop namespace.
+			}
+		}
+	case 2103:
+		for gid, preds := range m.Groups {
+			parsedPreds := preds[:0]
+			for _, pred := range preds {
+				ns_attr, err := x.AttrFrom2103(pred)
+				if err != nil {
+					return errors.Errorf("while parsing predicate got: %q", err)
+				}
+				parsedPreds = append(parsedPreds, ns_attr)
+			}
+			m.Groups[gid] = parsedPreds
+		}
+		for _, op := range m.DropOperations {
+			// We have a cluster wide drop data in v21.03.
+			if op.DropOp == pb.DropOperation_ATTR {
+				ns_attr, err := x.AttrFrom2103(op.DropValue)
+				if err != nil {
+					return errors.Errorf("while parsing the drop operation %+v got: %q",
+						op, err)
+				}
+				op.DropValue = ns_attr
+			}
+		}
+	case 2105:
+		// pass
+	}
+	return nil
+}
+
 func readManifest(h UriHandler, path string) (*Manifest, error) {
 	var m Manifest
 	b, err := h.Read(path)
@@ -200,10 +251,11 @@ func readMasterManifest(h UriHandler, path string) (*MasterManifest, error) {
 	return &m, nil
 }
 
-func GetManifest(h UriHandler, uri *url.URL) (*MasterManifest, error) {
+// GetManifestNoUpgrade returns the master manifest using the given handler and uri.
+func GetManifestNoUpgrade(h UriHandler, uri *url.URL) (*MasterManifest, error) {
 	if !h.DirExists("") {
-		return &MasterManifest{}, errors.Errorf("getManifest: The uri path: %q doesn't exists",
-			uri.Path)
+		return &MasterManifest{},
+			errors.Errorf("getManifestWithoutUpgrade: The uri path: %q doesn't exists", uri.Path)
 	}
 	manifest, err := getConsolidatedManifest(h, uri)
 	if err != nil {
@@ -212,7 +264,24 @@ func GetManifest(h UriHandler, uri *url.URL) (*MasterManifest, error) {
 	return manifest, nil
 }
 
-func createManifest(h UriHandler, uri *url.URL, manifest *MasterManifest) error {
+// GetManifest returns the master manifest using the given handler and uri. Additionally, it also
+// upgrades the manifest for the in-memory processing.
+// Note: This function must not be used when using the returned manifest for the purpose of
+// overwriting the old manifest.
+func GetManifest(h UriHandler, uri *url.URL) (*MasterManifest, error) {
+	manifest, err := GetManifestNoUpgrade(h, uri)
+	if err != nil {
+		return manifest, err
+	}
+	for _, m := range manifest.Manifests {
+		if err := upgradeManifest(m); err != nil {
+			return manifest, errors.Wrapf(err, "getManifest: failed to upgrade")
+		}
+	}
+	return manifest, nil
+}
+
+func CreateManifest(h UriHandler, uri *url.URL, manifest *MasterManifest) error {
 	w, err := h.CreateFile(tmpManifest)
 	if err != nil {
 		return errors.Wrap(err, "createManifest failed to create tmp path: ")

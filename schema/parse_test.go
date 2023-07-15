@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2016-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,12 @@ package schema
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/dgraph/protos/pb"
 	"github.com/dgraph-io/dgraph/types"
 	"github.com/dgraph-io/dgraph/x"
@@ -223,7 +222,7 @@ func TestParse4_NoError(t *testing.T) {
 	reset()
 	result, err := Parse("name:string @index(fulltext) .")
 	require.NotNil(t, result)
-	require.Nil(t, err)
+	require.NoError(t, err)
 }
 
 func TestParse5_Error(t *testing.T) {
@@ -650,18 +649,15 @@ func TestParseWithNamespace(t *testing.T) {
 var ps *badger.DB
 
 func TestMain(m *testing.M) {
-	x.Init()
+	dir, err := os.MkdirTemp("", "storetest_")
+	x.Panic(err)
+	defer os.RemoveAll(dir)
 
-	dir, err := ioutil.TempDir("", "storetest_")
-	x.Check(err)
 	kvOpt := badger.DefaultOptions(dir)
 	ps, err = badger.OpenManaged(kvOpt)
-	x.Check(err)
+	x.Panic(err)
+	defer ps.Close()
+
 	Init(ps)
-
-	r := m.Run()
-
-	ps.Close()
-	os.RemoveAll(dir)
-	os.Exit(r)
+	m.Run()
 }

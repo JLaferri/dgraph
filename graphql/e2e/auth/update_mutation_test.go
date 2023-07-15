@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- *    Copyright 2022 Dgraph Labs, Inc. and Contributors
+ *    Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,9 +48,7 @@ func getAllProjects(t *testing.T, users, roles []string) []string {
 			getParams.Headers = common.GetJWT(t, user, role, metaInfo)
 			gqlResponse := getParams.ExecuteAsPost(t, common.GraphqlURL)
 			common.RequireNoGQLErrors(t, gqlResponse)
-
-			err := json.Unmarshal([]byte(gqlResponse.Data), &result)
-			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal([]byte(gqlResponse.Data), &result))
 
 			for _, i := range result.QueryProject {
 				ids[i.ProjID] = struct{}{}
@@ -92,9 +92,7 @@ func getAllColumns(t *testing.T, users, roles []string) ([]*Column, []string) {
 			getParams.Headers = common.GetJWT(t, user, role, metaInfo)
 			gqlResponse := getParams.ExecuteAsPost(t, common.GraphqlURL)
 			common.RequireNoGQLErrors(t, gqlResponse)
-
-			err := json.Unmarshal(gqlResponse.Data, &result)
-			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 			for _, i := range result.QueryColumn {
 				if _, ok := ids[i.ColID]; ok {
@@ -142,9 +140,7 @@ func getAllQuestions(t *testing.T, users []string, answers []bool) ([]*Question,
 			getParams.Headers = common.GetJWTForInterfaceAuth(t, user, "", ans, metaInfo)
 			gqlResponse := getParams.ExecuteAsPost(t, common.GraphqlURL)
 			common.RequireNoGQLErrors(t, gqlResponse)
-
-			err := json.Unmarshal(gqlResponse.Data, &result)
-			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 			for _, i := range result.QueryQuestion {
 				if _, ok := ids[i.Id]; ok {
@@ -165,7 +161,9 @@ func getAllQuestions(t *testing.T, users []string, answers []bool) ([]*Question,
 	return questions, keys
 }
 
-func getAllPosts(t *testing.T, users []string, roles []string, answers []bool) ([]*Question, []*Answer, []*FbPost, []string) {
+func getAllPosts(t *testing.T, users []string, roles []string, answers []bool) (
+	[]*Question, []*Answer, []*FbPost, []string) {
+
 	Questions, getAllQuestionIds := getAllQuestions(t, users, answers)
 	Answers, getAllAnswerIds := getAllAnswers(t, users)
 	FbPosts, getAllFbPostIds := getAllFbPosts(t, users, roles)
@@ -212,9 +210,7 @@ func getAllFbPosts(t *testing.T, users []string, roles []string) ([]*FbPost, []s
 			getParams.Headers = common.GetJWT(t, user, role, metaInfo)
 			gqlResponse := getParams.ExecuteAsPost(t, common.GraphqlURL)
 			common.RequireNoGQLErrors(t, gqlResponse)
-
-			err := json.Unmarshal(gqlResponse.Data, &result)
-			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 			for _, i := range result.QueryFbPost {
 				if _, ok := ids[i.Id]; ok {
@@ -260,9 +256,7 @@ func getAllAnswers(t *testing.T, users []string) ([]*Answer, []string) {
 		getParams.Headers = common.GetJWT(t, user, "", metaInfo)
 		gqlResponse := getParams.ExecuteAsPost(t, common.GraphqlURL)
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		for _, i := range result.QueryAnswer {
 			if _, ok := ids[i.Id]; ok {
@@ -308,9 +302,7 @@ func getAllIssues(t *testing.T, users, roles []string) ([]*Issue, []string) {
 			getParams.Headers = common.GetJWT(t, user, role, metaInfo)
 			gqlResponse := getParams.ExecuteAsPost(t, common.GraphqlURL)
 			common.RequireNoGQLErrors(t, gqlResponse)
-
-			err := json.Unmarshal(gqlResponse.Data, &result)
-			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 			for _, i := range result.QueryIssue {
 				if _, ok := ids[i.Id]; ok {
@@ -358,9 +350,7 @@ func getAllMovies(t *testing.T, users, roles []string) ([]*Movie, []string) {
 			getParams.Headers = common.GetJWT(t, user, role, metaInfo)
 			gqlResponse := getParams.ExecuteAsPost(t, common.GraphqlURL)
 			common.RequireNoGQLErrors(t, gqlResponse)
-
-			err := json.Unmarshal(gqlResponse.Data, &result)
-			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 			for _, i := range result.QueryMovie {
 				if _, ok := ids[i.Id]; ok {
@@ -404,9 +394,7 @@ func getAllLogs(t *testing.T, users, roles []string) ([]*Log, []string) {
 			getParams.Headers = common.GetJWT(t, user, role, metaInfo)
 			gqlResponse := getParams.ExecuteAsPost(t, common.GraphqlURL)
 			common.RequireNoGQLErrors(t, gqlResponse)
-
-			err := json.Unmarshal(gqlResponse.Data, &result)
-			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 			for _, i := range result.QueryLog {
 				if _, ok := ids[i.Id]; ok {
@@ -428,7 +416,8 @@ func getAllLogs(t *testing.T, users, roles []string) ([]*Log, []string) {
 }
 
 func TestAuth_UpdateOnInterfaceWithAuthRules(t *testing.T) {
-	_, _, _, ids := getAllPosts(t, []string{"user1@dgraph.io", "user2@dgraph.io"}, []string{"ADMIN"}, []bool{true, false})
+	_, _, _, ids := getAllPosts(t, []string{"user1@dgraph.io", "user2@dgraph.io"},
+		[]string{"ADMIN"}, []bool{true, false})
 	testCases := []TestCase{{
 		name:   "Only 2 nodes satisfy auth rules with the given values and hence should be updated",
 		user:   "user1@dgraph.io",
@@ -741,7 +730,7 @@ func TestUpdateNestedFilter(t *testing.T) {
 	}, {
 		user:   "user2",
 		role:   "USER",
-		result: `{"updateMovie": {"movie": [{ "content": "Movie1" }, { "content": "Movie2" }, { "content": "Movie3" }, { "content": "Movie4" }]}}`,
+		result: `{"updateMovie": {"movie": [{ "content": "Movie1" }, { "content": "Movie2" }, { "content": "Movie3" }, { "content": "Movie4" }]}}`, //nolint:lll
 	}}
 
 	query := `

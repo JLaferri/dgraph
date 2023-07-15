@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +20,6 @@ package live
 
 import (
 	"context"
-	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,7 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210"
+	"github.com/dgraph-io/dgo/v230"
 	"github.com/dgraph-io/dgraph/testutil"
 	"github.com/dgraph-io/dgraph/x"
 )
@@ -183,16 +183,14 @@ func TestMain(m *testing.M) {
 
 	var err error
 	dg, err = testutil.DgraphClientWithGroot(testutil.SockAddr)
-	if err != nil {
-		log.Fatalf("Error while getting a dgraph client: %v", err)
-	}
+	x.Panic(err)
 
 	// Try to create any files in a dedicated temp directory that gets cleaned up
 	// instead of all over /tmp or the working directory.
-	tmpDir, err := ioutil.TempDir("", "test.tmp-")
-	x.Check(err)
-	os.Chdir(tmpDir)
+	tmpDir, err := os.MkdirTemp("", "test.tmp-")
+	x.Panic(err)
+	x.Panic(os.Chdir(tmpDir))
 	defer os.RemoveAll(tmpDir)
 
-	os.Exit(m.Run())
+	m.Run()
 }

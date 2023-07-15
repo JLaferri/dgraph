@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -32,6 +31,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"github.com/golang/glog"
+	"github.com/pkg/errors"
 	"golang.org/x/net/context"
 
 	"github.com/dgraph-io/dgraph/x"
@@ -61,27 +61,42 @@ func (in ContainerInstance) BestEffortWaitForHealthy(privatePort uint16) error {
 		return nil
 	}
 	checkACL := func(body []byte) error {
-		const acl string = "\"acl\""
-		if bytes.Index(body, []byte(acl)) > 0 {
+		// Zero returns OK as response
+		if string(body) == "OK" {
+			return nil
+		}
+
+		const eef string = `"ee_features"`
+		const acl string = `"acl"`
+		if !bytes.Contains(body, []byte(eef)) {
+			return errors.New("EE features are not enabled yet")
+		}
+		if bytes.Contains(body, []byte(acl)) {
 			return in.bestEffortTryLogin()
 		}
 		return nil
 	}
 
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 60; i++ {
 		resp, err := http.Get("http://localhost:" + port + "/health")
 		var body []byte
 		if resp != nil && resp.Body != nil {
-			body, _ = ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
+			body, _ = io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
 		}
 		if err == nil && resp.StatusCode == http.StatusOK {
-			return checkACL(body)
+			if aerr := checkACL(body); aerr == nil {
+				return nil
+			} else {
+				fmt.Printf("waiting for login to work: %v\n", aerr)
+				time.Sleep(time.Second)
+				continue
+			}
 		}
 		fmt.Printf("Health for %s failed: %v. Response: %q. Retrying...\n", in, err, body)
 		time.Sleep(time.Second)
 	}
-	return nil
+	return fmt.Errorf("did not pass health check on %s", "http://localhost:"+port+"/health\n")
 }
 
 func (in ContainerInstance) publicPort(privatePort uint16) string {
@@ -117,7 +132,7 @@ func (in ContainerInstance) login() error {
 }
 
 func (in ContainerInstance) bestEffortTryLogin() error {
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 60; i++ {
 		err := in.login()
 		if err == nil {
 			return nil
@@ -130,11 +145,11 @@ func (in ContainerInstance) bestEffortTryLogin() error {
 			// This is TLS enabled cluster. We won't be able to login.
 			return nil
 		}
-		fmt.Printf("Login failed for %s: %v. Retrying...\n", in, err)
+		fmt.Printf("login failed for %s: %v. Retrying...\n", in, err)
 		time.Sleep(time.Second)
 	}
-	fmt.Printf("Unable to login to %s\n", in)
-	return fmt.Errorf("Unable to login to %s\n", in)
+	fmt.Printf("unable to login to %s\n", in)
+	return fmt.Errorf("unable to login to %s", in)
 }
 
 func (in ContainerInstance) GetContainer() *types.Container {
@@ -246,7 +261,8 @@ func DockerCpFromContainer(containerID, srcPath, dstPath string) error {
 		return nil
 	}
 	tr := tar.NewReader(tarStream)
-	tr.Next()
+	_, err = tr.Next()
+	x.Check(err)
 
 	data, err := io.ReadAll(tr)
 	x.Check(err)
@@ -270,4 +286,29 @@ func DockerInspect(containerID string) (types.ContainerJSON, error) {
 	cli, err := client.NewEnvClient()
 	x.Check(err)
 	return cli.ContainerInspect(context.Background(), containerID)
+}
+
+// checkHealthContainer checks health of container and determines wheather container is ready to accept request
+func CheckHealthContainer(socketAddrHttp string) error {
+	var err error
+	var resp *http.Response
+	url := "http://" + socketAddrHttp + "/health"
+	for i := 0; i < 30; i++ {
+		resp, err = http.Get(url)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		var body []byte
+		if resp != nil && resp.Body != nil {
+			body, err = io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			_ = resp.Body.Close()
+		}
+		fmt.Printf("health check for container failed: %v. Response: %q. Retrying...\n", err, body)
+		time.Sleep(time.Second)
+
+	}
+	return err
 }

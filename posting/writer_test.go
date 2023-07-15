@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,17 +18,15 @@ package posting
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math"
-	"os"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/badger/v3"
-	"github.com/dgraph-io/badger/v3/options"
-	bpb "github.com/dgraph-io/badger/v3/pb"
+	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/badger/v4/options"
+	bpb "github.com/dgraph-io/badger/v4/pb"
 )
 
 var val = make([]byte, 128)
@@ -90,9 +88,7 @@ func BenchmarkWriter(b *testing.B) {
 
 	// Vanilla TxnWriter
 	b.Run("TxnWriter", func(b *testing.B) {
-		tmpIndexDir, err := ioutil.TempDir("", "dgraph")
-		require.NoError(b, err)
-		defer os.RemoveAll(tmpIndexDir)
+		tmpIndexDir := b.TempDir()
 
 		dbOpts.Dir = tmpIndexDir
 		dbOpts.ValueDir = tmpIndexDir
@@ -106,8 +102,7 @@ func BenchmarkWriter(b *testing.B) {
 			for _, typ := range KVList.Kv {
 				k := typ.Key
 				v := typ.Value
-				err := w.SetAt(k, v, BitSchemaPosting, 1)
-				require.NoError(b, err)
+				require.NoError(b, w.SetAt(k, v, BitSchemaPosting, 1))
 			}
 			require.NoError(b, w.Flush())
 
@@ -115,9 +110,7 @@ func BenchmarkWriter(b *testing.B) {
 	})
 	// Single threaded BatchWriter
 	b.Run("WriteBatch1", func(b *testing.B) {
-		tmpIndexDir, err := ioutil.TempDir("", "dgraph")
-		require.NoError(b, err)
-		defer os.RemoveAll(tmpIndexDir)
+		tmpIndexDir := b.TempDir()
 
 		dbOpts.Dir = tmpIndexDir
 		dbOpts.ValueDir = tmpIndexDir
@@ -138,9 +131,7 @@ func BenchmarkWriter(b *testing.B) {
 	})
 	// Multi threaded Batchwriter with thread contention in WriteBatch
 	b.Run("WriteBatchMultThreadDiffWB", func(b *testing.B) {
-		tmpIndexDir, err := ioutil.TempDir("", "dgraph")
-		require.NoError(b, err)
-		defer os.RemoveAll(tmpIndexDir)
+		tmpIndexDir := b.TempDir()
 
 		dbOpts.Dir = tmpIndexDir
 		dbOpts.ValueDir = tmpIndexDir
@@ -166,9 +157,7 @@ func BenchmarkWriter(b *testing.B) {
 	})
 	// Multi threaded Batchwriter with thread contention in SetEntry
 	b.Run("WriteBatchMultThreadSameWB", func(b *testing.B) {
-		tmpIndexDir, err := ioutil.TempDir("", "dgraph")
-		require.NoError(b, err)
-		defer os.RemoveAll(tmpIndexDir)
+		tmpIndexDir := b.TempDir()
 
 		dbOpts.Dir = tmpIndexDir
 		dbOpts.ValueDir = tmpIndexDir
@@ -194,9 +183,7 @@ func BenchmarkWriter(b *testing.B) {
 		}
 	})
 	b.Run("WriteBatchSingleThreadDiffWB", func(b *testing.B) {
-		tmpIndexDir, err := ioutil.TempDir("", "dgraph")
-		require.NoError(b, err)
-		defer os.RemoveAll(tmpIndexDir)
+		tmpIndexDir := b.TempDir()
 
 		dbOpts.Dir = tmpIndexDir
 		dbOpts.ValueDir = tmpIndexDir
@@ -216,9 +203,7 @@ func BenchmarkWriter(b *testing.B) {
 		}
 	})
 	b.Run("WriteBatchSingleThreadSameWB", func(b *testing.B) {
-		tmpIndexDir, err := ioutil.TempDir("", "dgraph")
-		require.NoError(b, err)
-		defer os.RemoveAll(tmpIndexDir)
+		tmpIndexDir := b.TempDir()
 
 		dbOpts.Dir = tmpIndexDir
 		dbOpts.ValueDir = tmpIndexDir

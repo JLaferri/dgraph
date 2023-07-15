@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/ristretto/z"
 )
 
@@ -39,6 +39,8 @@ type Options struct {
 	// mutations-nquad int - maximum number of nquads that can be inserted in a mutation request
 	// BlockDropAll bool - if set to true, the drop all operation will be rejected by the server.
 	// query-timeout duration - Maximum time after which a query execution will fail.
+	// max-retries int64 - maximum number of retries made by dgraph to commit a transaction to disk.
+	// shared-instance bool - if set to true, ACLs will be disabled for non-galaxy users.
 	Limit                *z.SuperFlag
 	LimitMutationsNquad  int
 	LimitQueryEdge       uint64
@@ -46,6 +48,7 @@ type Options struct {
 	LimitNormalizeNode   int
 	QueryTimeout         time.Duration
 	MaxRetries           int64
+	SharedInstance       bool
 
 	// GraphQL options:
 	//
@@ -85,7 +88,7 @@ type WorkerOptions struct {
 	//
 	// ratio float64 - the ratio of queries to trace (must be between 0 and 1)
 	// jaeger string - URL of Jaeger to send OpenCensus traces
-	// datadog string - URL of Datadog to to send OpenCensus traces
+	// datadog string - URL of Datadog to send OpenCensus traces
 	Trace *z.SuperFlag
 	// MyAddr stores the address and port for this alpha.
 	MyAddr string

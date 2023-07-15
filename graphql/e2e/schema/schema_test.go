@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +16,7 @@
  * limitations under the License.
  */
 
+//nolint:lll
 package schema
 
 import (
@@ -21,7 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -31,7 +34,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/graphql/e2e/common"
 	"github.com/dgraph-io/dgraph/testutil"
 	"github.com/dgraph-io/dgraph/worker"
@@ -459,7 +462,7 @@ func testCORS(t *testing.T, schema, reqOrigin, expectedAllowedOrigin,
 
 	gqlRes := &common.GraphQLResponse{}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(body, gqlRes))
 	common.RequireNoGQLErrors(t, gqlRes)
@@ -505,8 +508,12 @@ func TestGQLSchemaValidate(t *testing.T) {
 					f1: String! @dgraph(pred:"~movie")
 				}
 			`,
-			errors: x.GqlErrorList{{Message: "input:3: Type X; Field id: has the @dgraph directive but fields of type ID can't have the @dgraph directive."}, {Message: "input:7: Type Y; Field f1 is of type String, but reverse predicate in @dgraph directive only applies to fields with object types."}},
-			valid:  false,
+			errors: x.GqlErrorList{
+				{Message: "input:3: Type X; Field id: has the @dgraph directive " +
+					"but fields of type ID can't have the @dgraph directive."},
+				{Message: "input:7: Type Y; Field f1 is of type String, " +
+					"but reverse predicate in @dgraph directive only applies to fields with object types."}},
+			valid: false,
 		},
 	}
 
@@ -517,8 +524,7 @@ func TestGQLSchemaValidate(t *testing.T) {
 		require.NoError(t, err)
 
 		decoder := json.NewDecoder(resp.Body)
-		err = decoder.Decode(&response)
-		require.NoError(t, err)
+		require.NoError(t, decoder.Decode(&response))
 
 		// Verify that we only validate the schema and not set it.
 		require.Empty(t, common.AssertGetGQLSchema(t, groupOneHTTP, nil).Schema)
@@ -545,7 +551,7 @@ func TestUpdateGQLSchemaFields(t *testing.T) {
 		name: String!
 	}`
 
-	generatedSchema, err := ioutil.ReadFile("generatedSchema.graphql")
+	generatedSchema, err := os.ReadFile("generatedSchema.graphql")
 	require.NoError(t, err)
 	require.Equal(t, string(generatedSchema), common.SafelyUpdateGQLSchema(t, groupOneHTTP,
 		schema, nil).GeneratedSchema)
@@ -581,7 +587,7 @@ func TestIntrospection(t *testing.T) {
 		name: String
 	}`
 	common.SafelyUpdateGQLSchema(t, groupOneHTTP, schema, nil)
-	query, err := ioutil.ReadFile("../../schema/testdata/introspection/input/full_query.graphql")
+	query, err := os.ReadFile("../../schema/testdata/introspection/input/full_query.graphql")
 	require.NoError(t, err)
 
 	introspectionParams := &common.GraphQLParams{Query: string(query)}
@@ -645,7 +651,7 @@ func TestApolloServiceResolver(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(resp.Data, &gqlRes))
 
-	sdl, err := ioutil.ReadFile("apollo_service_response.graphql")
+	sdl, err := os.ReadFile("apollo_service_response.graphql")
 	require.NoError(t, err)
 
 	require.Equal(t, string(sdl), gqlRes.Service.S)
@@ -686,7 +692,7 @@ func TestDeleteSchemaAndExport(t *testing.T) {
 
 	require.Equal(t, "Success", testutil.JsonGet(data, "export", "response", "code").(string))
 	taskId := testutil.JsonGet(data, "export", "taskId").(string)
-	testutil.WaitForTask(t, taskId, false)
+	testutil.WaitForTask(t, taskId, false, testutil.SockAddrHttp)
 
 	// applying a new schema should still work
 	newSchemaResp := common.AssertUpdateGQLSchemaSuccess(t, groupOneHTTP, schema, nil)
@@ -704,10 +710,6 @@ func updateGQLSchemaConcurrent(t *testing.T, schema, authority string) bool {
 }
 
 func TestMain(m *testing.M) {
-	err := common.CheckGraphQLStarted(common.GraphqlAdminURL)
-	if err != nil {
-		x.Log(err, "Waited for GraphQL test server to become available, but it never did.")
-		os.Exit(1)
-	}
-	os.Exit(m.Run())
+	x.Panic(common.CheckGraphQLStarted(common.GraphqlAdminURL))
+	m.Run()
 }

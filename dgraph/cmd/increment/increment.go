@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,8 +31,8 @@ import (
 	"github.com/spf13/viper"
 	"go.opencensus.io/trace"
 
-	"github.com/dgraph-io/dgo/v210"
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/x"
 	"github.com/dgraph-io/ristretto/z"
 )
@@ -181,7 +181,7 @@ func run(conf *viper.Viper) {
 
 	waitDur := conf.GetDuration("wait")
 	num := conf.GetInt("num")
-	conc := int(conf.GetInt("conc"))
+	conc := conf.GetInt("conc")
 	format := "0102 03:04:05.999"
 
 	// Do a sanity check on the passed credentials.
@@ -190,7 +190,7 @@ func run(conf *viper.Viper) {
 	var dg *dgo.Dgraph
 	sf := z.NewSuperFlag(conf.GetString("cloud"))
 	if addr := sf.GetString("addr"); len(addr) > 0 {
-		conn, err := dgo.DialSlashEndpoint(addr, sf.GetString("jwt"))
+		conn, err := dgo.DialCloud(addr, sf.GetString("jwt"))
 		x.Check(err)
 		dc := api.NewDgraphClient(conn)
 		dg = dgo.NewDgraphClient(dc)

@@ -4,7 +4,7 @@
 # This gets built as part of release.sh. Must be run from /tmp/build, with the linux binaries
 # already built and placed there.
 
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 LABEL maintainer="Dgraph Labs <contact@dgraph.io>"
 
 # need to remove the cache of sources lists
@@ -13,20 +13,21 @@ LABEL maintainer="Dgraph Labs <contact@dgraph.io>"
 RUN rm -rf /var/lib/apt/lists/*
 
 # only update, don't run upgrade
-RUN apt-get update
-# pin package versions always & bring in CVE fixes as needed
-RUN apt-get install -y --no-install-recommends ca-certificates
-RUN apt-get install -y --no-install-recommends curl
-RUN apt-get install -y --no-install-recommends htop
-RUN apt-get install -y --no-install-recommends iputils-ping
-RUN apt-get install -y --no-install-recommends jq
-RUN apt-get install -y --no-install-recommends less
-RUN apt-get install -y --no-install-recommends sysstat
+# use cache busting to avoid old versions
+# remove /var/lib/apt/lists/* to reduce image size. 
+# see: https://docs.docker.com/develop/develop-images/dockerfile_best-practices 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    htop \
+    curl \
+    htop \
+    iputils-ping \
+    jq \
+    less \
+    sysstat \
+    && rm -rf /var/lib/apt/lists/*
 
 ADD linux /usr/local/bin
-
-EXPOSE 8080
-EXPOSE 9080
 
 RUN mkdir /dgraph
 WORKDIR /dgraph

@@ -1,5 +1,7 @@
+//go:build integration || cloud || upgrade
+
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,19 +16,20 @@
  * limitations under the License.
  */
 
+//nolint:lll
 package query
 
 import (
 	"context"
-	"os"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210"
+	"github.com/dgraph-io/dgo/v230"
+	"github.com/dgraph-io/dgraph/dgraphtest"
 	"github.com/dgraph-io/dgraph/dql"
-	"github.com/dgraph-io/dgraph/testutil"
-	"github.com/dgraph-io/dgraph/x"
 )
 
 func TestGetUID(t *testing.T) {
@@ -1421,6 +1424,45 @@ func TestQueryVarValOrderError(t *testing.T) {
 	require.Contains(t, err.Error(), "Cannot sort by unknown attribute n")
 }
 
+func TestQueryVarEmptyRootOrderError(t *testing.T) {
+	// This bug was fixed in commit b256f9c6e6c68ae163eee3242518f77a6ab35fa0
+	dgraphtest.ShouldSkipTest(t, "b256f9c6e6c68ae163eee3242518f77a6ab35fa0", dc.GetVersion())
+
+	query := `
+		{
+			q(func: eq(name, "DNEinDB")) {
+				friend(orderdesc: id) {
+					name
+				}
+			}
+		}
+	`
+	_, err := processQuery(context.Background(), t, query)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Cannot sort by unknown attribute id")
+}
+
+func TestQueryVarEmptyRootOrderChildQueryError(t *testing.T) {
+	// This bug was fixed in commit b256f9c6e6c68ae163eee3242518f77a6ab35fa0
+	dgraphtest.ShouldSkipTest(t, "b256f9c6e6c68ae163eee3242518f77a6ab35fa0", dc.GetVersion())
+
+	query := `
+		{
+			var(func: eq(name, "DNEinDB")) {
+				friend(orderdesc: id) {
+					f as count(uid)
+				}
+			}
+			q(func: uid(f)){
+				name
+			}
+		}
+	`
+	_, err := processQuery(context.Background(), t, query)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Cannot sort by unknown attribute id")
+}
+
 func TestQueryVarValOrderDesc(t *testing.T) {
 	query := `
 		{
@@ -2510,7 +2552,7 @@ func TestDateTimeQuery(t *testing.T) {
 	// Test 21
 	query = `
 {
-  q(func: between(created_at, "2021-03-28T14:41:57+30:00", "2019-03-28T15:41:57+30:00"), orderdesc: created_at) {
+  q(func: between(created_at, "2021-03-28T07:41:57+23:00", "2019-03-28T08:41:57+23:00"), orderdesc: created_at) {
 	  uid
 	  created_at
   }
@@ -2521,14 +2563,14 @@ func TestDateTimeQuery(t *testing.T) {
 	// Test 20
 	query = `
 {
-  q(func: between(created_at, "2019-03-28T14:41:57+30:00", "2019-03-28T15:41:57+30:00"), orderdesc: created_at) {
+  q(func: between(created_at, "2019-03-28T07:41:57+23:00", "2019-03-28T08:41:57+23:00"), orderdesc: created_at) {
 	  uid
 	  created_at
 	}
 }
 `
 	require.JSONEq(t,
-		`{"data":{"q":[{"uid":"0x130","created_at":"2019-03-28T15:41:57+30:00"},{"uid":"0x12d","created_at":"2019-03-28T14:41:57+30:00"},{"uid":"0x12e","created_at":"2019-03-28T13:41:57+29:00"},{"uid":"0x12f","created_at":"2019-03-27T14:41:57+06:00"}]}}`,
+		`{"data":{"q":[{"uid":"0x130","created_at":"2019-03-28T08:41:57+23:00"},{"uid":"0x12d","created_at":"2019-03-28T07:41:57+23:00"},{"uid":"0x12e","created_at":"2019-03-28T07:41:57+23:00"},{"uid":"0x12f","created_at":"2019-03-27T14:41:57+06:00"}]}}`,
 		processQueryNoErr(t, query))
 
 	// Test 19
@@ -2541,7 +2583,7 @@ func TestDateTimeQuery(t *testing.T) {
 }
 `
 	require.JSONEq(t,
-		`{"data":{"q":[{"uid":"0x133","created_at":"2019-05-28T14:41:57+30:00"},{"uid":"0x130","created_at":"2019-03-28T15:41:57+30:00"},{"uid":"0x12d","created_at":"2019-03-28T14:41:57+30:00"},{"uid":"0x12e","created_at":"2019-03-28T13:41:57+29:00"},{"uid":"0x12f","created_at":"2019-03-27T14:41:57+06:00"},{"uid":"0x131","created_at":"2019-03-28T13:41:57+30:00"},{"uid":"0x132","created_at":"2019-03-24T14:41:57+05:30"}]}}`,
+		`{"data":{"q":[{"uid":"0x133","created_at":"2019-05-28T07:41:57+23:00"},{"uid":"0x130","created_at":"2019-03-28T08:41:57+23:00"},{"uid":"0x12d","created_at":"2019-03-28T07:41:57+23:00"},{"uid":"0x12e","created_at":"2019-03-28T07:41:57+23:00"},{"uid":"0x12f","created_at":"2019-03-27T14:41:57+06:00"},{"uid":"0x131","created_at":"2019-03-28T06:41:57+23:00"},{"uid":"0x132","created_at":"2019-03-24T14:41:57+05:30"}]}}`,
 		processQueryNoErr(t, query))
 
 	// Test 18
@@ -2591,7 +2633,7 @@ func TestDateTimeQuery(t *testing.T) {
 				  "uid": "0x2",
 				  "best_friend": {
 					"uid": "0x40",
-				    "best_friend|since": "2019-03-28T14:41:57+30:00"
+				    "best_friend|since": "2019-03-28T07:41:57+23:00"
 				  }
 				}
 			  ]
@@ -2610,7 +2652,7 @@ func TestDateTimeQuery(t *testing.T) {
 }
 `
 	require.JSONEq(t,
-		`{"data":{"q":[{"uid":"0x133","created_at":"2019-05-28T14:41:57+30:00","updated_at|modified_at":"2019-03-24T14:41:57+05:30","updated_at":"2019-05-28T00:00:00Z"}]}}`,
+		`{"data":{"q":[{"uid":"0x133","created_at":"2019-05-28T07:41:57+23:00","updated_at|modified_at":"2019-03-24T14:41:57+05:30","updated_at":"2019-05-28T00:00:00Z"}]}}`,
 		processQueryNoErr(t, query))
 
 	// Test 15
@@ -2740,7 +2782,7 @@ func TestDateTimeQuery(t *testing.T) {
 }
 `
 	require.JSONEq(t,
-		`{"data":{"q":[{"uid":"0x131","updated_at":"2019-03-28T13:41:57+30:00"},{"uid":"0x132","updated_at":"2019-03-24T14:41:57+05:30"}]}}`,
+		`{"data":{"q":[{"uid":"0x131","updated_at":"2019-03-28T06:41:57+23:00"},{"uid":"0x132","updated_at":"2019-03-24T14:41:57+05:30"}]}}`,
 		processQueryNoErr(t, query))
 
 	// Test 5
@@ -2779,7 +2821,7 @@ func TestDateTimeQuery(t *testing.T) {
 }
 `
 	require.JSONEq(t,
-		`{"data":{"q":[{"uid":"0x131","created_at":"2019-03-28T13:41:57+30:00"},{"uid":"0x132","created_at":"2019-03-24T14:41:57+05:30"}]}}`,
+		`{"data":{"q":[{"uid":"0x131","created_at":"2019-03-28T06:41:57+23:00"},{"uid":"0x132","created_at":"2019-03-24T14:41:57+05:30"}]}}`,
 		processQueryNoErr(t, query))
 
 	// Test 2
@@ -2792,7 +2834,7 @@ func TestDateTimeQuery(t *testing.T) {
 }
 `
 	require.JSONEq(t,
-		`{"data":{"q":[{"uid":"0x133","created_at":"2019-05-28T14:41:57+30:00"}]}}`,
+		`{"data":{"q":[{"uid":"0x133","created_at":"2019-05-28T07:41:57+23:00"}]}}`,
 		processQueryNoErr(t, query))
 
 	// Test 1
@@ -2805,7 +2847,7 @@ func TestDateTimeQuery(t *testing.T) {
 }
 `
 	require.JSONEq(t,
-		`{"data":{"q":[{"uid":"0x133","created_at":"2019-05-28T14:41:57+30:00"}]}}`,
+		`{"data":{"q":[{"uid":"0x133","created_at":"2019-05-28T07:41:57+23:00"}]}}`,
 		processQueryNoErr(t, query))
 }
 
@@ -3511,13 +3553,28 @@ func TestMatchingWithPagination(t *testing.T) {
 	}
 }
 
-var client *dgo.Dgraph
+func TestInvalidRegex(t *testing.T) {
+	// This bug was fixed in commit e0cc0450b88593b7496c0947aea016fc6457cb61
+	dgraphtest.ShouldSkipTest(t, "e0cc0450b88593b7496c0947aea016fc6457cb61", dc.GetVersion())
 
-func TestMain(m *testing.M) {
-	var err error
-	client, err = testutil.DgraphClientWithGroot(testutil.SockAddr)
-	x.CheckfNoTrace(err)
-
-	populateCluster()
-	os.Exit(m.Run())
+	testCases := []struct {
+		regex  string
+		errStr string
+	}{
+		{"/", "invalid"},
+		{"", "empty"},
+		{"/?", "invalid"},
+		{"=/?", "invalid"},
+		{"aman/", "invalid"},
+	}
+	for i, tc := range testCases {
+		t.Run(fmt.Sprintf("test%d regex=%v", i, tc.regex), func(t *testing.T) {
+			vars := map[string]string{"$name": tc.regex}
+			_, err := processQueryWithVars(t, `query q($name:string){ q(func: regexp(dgraph.type, $name)) {}}`, vars)
+			require.Contains(t, strings.ToLower(err.Error()), tc.errStr)
+		})
+	}
 }
+
+var client *dgo.Dgraph
+var dc dgraphtest.Cluster

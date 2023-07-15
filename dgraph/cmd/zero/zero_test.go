@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +20,22 @@ package zero
 
 import (
 	"context"
+	"encoding/json"
+	"io/ioutil"
 	"math"
+	"net/http"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/dgraph-io/dgraph/conn"
 	"github.com/dgraph-io/dgraph/protos/pb"
 	"github.com/dgraph-io/dgraph/testutil"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 func TestRemoveNode(t *testing.T) {
@@ -50,7 +60,7 @@ func TestIdLeaseOverflow(t *testing.T) {
 func TestIdBump(t *testing.T) {
 	dialOpts := []grpc.DialOption{
 		grpc.WithBlock(),
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 	ctx := context.Background()
 	con, err := grpc.DialContext(ctx, testutil.SockAddrZero, dialOpts...)
@@ -62,7 +72,7 @@ func TestIdBump(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(10), res.GetEndId()-res.GetStartId()+1)
 
-	// Next assignemnt's startId should be greater than 10.
+	// Next assignment's startId should be greater than 10.
 	res, err = zc.AssignIds(ctx, &pb.Num{Val: 50, Type: pb.Num_UID})
 	require.NoError(t, err)
 	require.Greater(t, res.GetStartId(), uint64(10))
@@ -74,7 +84,7 @@ func TestIdBump(t *testing.T) {
 	_, err = zc.AssignIds(ctx, &pb.Num{Val: bumpTo, Type: pb.Num_UID, Bump: true})
 	require.NoError(t, err)
 
-	// Next assignemnt's startId should be greater than bumpTo.
+	// Next assignment's startId should be greater than bumpTo.
 	res, err = zc.AssignIds(ctx, &pb.Num{Val: 10, Type: pb.Num_UID})
 	require.NoError(t, err)
 	require.Greater(t, res.GetStartId(), bumpTo)
@@ -83,4 +93,72 @@ func TestIdBump(t *testing.T) {
 	// If bump request is less than maxLease, then it should result in no-op.
 	_, err = zc.AssignIds(ctx, &pb.Num{Val: 10, Type: pb.Num_UID, Bump: true})
 	require.Contains(t, err.Error(), "Nothing to be leased")
+}
+
+func TestProposalKey(t *testing.T) {
+	id := uint64(2)
+	node := &node{Node: &conn.Node{Id: id}, ctx: context.Background(), closer: z.NewCloser(1)}
+	require.NoError(t, node.initProposalKey(node.Id))
+
+	pkey := proposalKey
+	nodeIdFromKey := proposalKey >> 48
+	require.Equal(t, id, nodeIdFromKey, "id extracted from proposal key is not equal to initial value")
+
+	valueOf48thBit := int(pkey & (1 << 48))
+	require.Equal(t, 0, valueOf48thBit, "48th bit is not set to zero on initialisation")
+
+	node.uniqueKey()
+	require.Equal(t, pkey+1, proposalKey, "proposal key should increment by 1 at each call of unique key")
+
+	uniqueKeys := make(map[uint64]struct{})
+	for i := 0; i < 10; i++ {
+		node.uniqueKey()
+		uniqueKeys[proposalKey] = struct{}{}
+	}
+	require.Equal(t, len(uniqueKeys), 10, "each iteration should create unique key")
+}
+
+func TestZeroHealth(t *testing.T) {
+	client := http.Client{Timeout: 3 * time.Second}
+	u := &url.URL{
+		Scheme: "http",
+		Host:   testutil.ContainerAddr("zero1", 6080),
+		Path:   "health",
+	}
+
+	// JSON format
+	req, err := http.NewRequest("GET", u.String(), nil)
+	require.NoError(t, err)
+
+	req.Header.Add("Accept", `application/json`)
+	start := time.Now().Unix()
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var r map[string]interface{}
+	err = json.Unmarshal(body, &r)
+	require.NoError(t, err)
+
+	require.Equal(t, "zero", r["instance"].(string))
+	require.Equal(t, "zero1:5080", r["address"].(string))
+	require.Equal(t, "healthy", r["status"].(string))
+	require.NotEqual(t, 0, len(r["version"].(string)))
+	require.Greater(t, r["uptime"].(float64), 0.0)
+	require.GreaterOrEqual(t, int64(r["lastEcho"].(float64)), start)
+
+	// String format
+	req, err = http.NewRequest("GET", u.String(), nil)
+	require.NoError(t, err)
+
+	resp, err = client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err = ioutil.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, string(body), "OK")
 }

@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors *
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -24,24 +26,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210"
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/systest/backup/common"
 	"github.com/dgraph-io/dgraph/testutil"
 	"github.com/dgraph-io/dgraph/x"
 )
 
 var (
-	copyBackupDir   = "./data/backups_copy"
-	restoreDir      = "./data/restore"
-	testDirs        = []string{restoreDir}
-	alphaBackupDir  = "/data/backups"
-	oldBackupDir    = "/data/to_restore"
-	alphaContainers = []string{
-		"alpha1",
-		"alpha2",
-		"alpha3",
-	}
+	copyBackupDir  = "./data/backups_copy"
+	alphaBackupDir = "/data/backups"
 )
 
 func TestBackupMultiTenancy(t *testing.T) {
@@ -50,9 +44,9 @@ func TestBackupMultiTenancy(t *testing.T) {
 	dg := testutil.DgClientWithLogin(t, "groot", "password", x.GalaxyNamespace)
 	testutil.DropAll(t, dg)
 
-	galaxyCreds := &testutil.LoginParams{
-		UserID: "groot", Passwd: "password", Namespace: x.GalaxyNamespace}
-	galaxyToken := testutil.Login(t, galaxyCreds)
+	galaxyCreds := &testutil.LoginParams{UserID: "groot", Passwd: "password", Namespace: x.GalaxyNamespace}
+	galaxyToken, err := testutil.Login(t, galaxyCreds)
+	require.NoError(t, err, "login failed")
 
 	// Create a new namespace
 	ns1, err := testutil.CreateNamespaceWithRetry(t, galaxyToken)
@@ -111,7 +105,7 @@ func TestBackupMultiTenancy(t *testing.T) {
 	_ = runBackup(t, galaxyToken, 3, 1)
 	testutil.DropAll(t, dg)
 	sendRestoreRequest(t, alphaBackupDir, galaxyToken.AccessJwt)
-	testutil.WaitForRestore(t, dg)
+	testutil.WaitForRestore(t, dg, testutil.SockAddrHttp)
 
 	query := `{ q(func: has(movie)) { count(uid) } }`
 	expectedResponse := `{ "q": [{ "count": 5 }]}`
@@ -125,7 +119,7 @@ func TestBackupMultiTenancy(t *testing.T) {
 	_ = runBackup(t, galaxyToken, 6, 2)
 	testutil.DropAll(t, dg)
 	sendRestoreRequest(t, alphaBackupDir, galaxyToken.AccessJwt)
-	testutil.WaitForRestore(t, dg)
+	testutil.WaitForRestore(t, dg, testutil.SockAddrHttp)
 	testutil.VerifyQueryResponse(t, dg, query, expectedResponse)
 	testutil.VerifyQueryResponse(t, dg1, query, expectedResponse)
 	testutil.VerifyQueryResponse(t, dg2, query, `{ "q": [{ "count": 0 }]}`)
@@ -136,7 +130,7 @@ func TestBackupMultiTenancy(t *testing.T) {
 	_ = runBackup(t, galaxyToken, 9, 3)
 	testutil.DropAll(t, dg)
 	sendRestoreRequest(t, alphaBackupDir, galaxyToken.AccessJwt)
-	testutil.WaitForRestore(t, dg)
+	testutil.WaitForRestore(t, dg, testutil.SockAddrHttp)
 	query = `{ q(func: has(movie)) { count(uid) } }`
 	expectedResponse = `{ "q": [{ "count": 5 }]}`
 	testutil.VerifyQueryResponse(t, dg, query, expectedResponse)
@@ -174,7 +168,7 @@ func runBackupInternal(t *testing.T, token *testutil.HttpToken, forceFull bool, 
 	require.NoError(t, json.Unmarshal(resp.Data, &data))
 	require.Equal(t, "Success", testutil.JsonGet(data, "backup", "response", "code").(string))
 	taskId := testutil.JsonGet(data, "backup", "taskId").(string)
-	testutil.WaitForTask(t, taskId, false)
+	testutil.WaitForTask(t, taskId, false, testutil.SockAddrHttp)
 
 	// Verify that the right amount of files and directories were created.
 	common.CopyToLocalFs(t)
@@ -219,5 +213,4 @@ func sendRestoreRequest(t *testing.T, location string, token string) {
 
 	require.NoError(t, json.Unmarshal(resp.Data, &restoreResp))
 	require.Equal(t, restoreResp.Restore.Code, "Success")
-	return
 }

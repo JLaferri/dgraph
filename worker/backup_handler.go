@@ -2,13 +2,13 @@
 // +build !oss
 
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Dgraph Community License (the "License"); you
  * may not use this file except in compliance with the License. You
  * may obtain a copy of the License at
  *
- *     https://github.com/dgraph-io/dgraph/blob/master/licenses/DCL.txt
+ *     https://github.com/dgraph-io/dgraph/blob/main/licenses/DCL.txt
  */
 
 package worker
@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -158,7 +157,7 @@ func NewFileHandler(uri *url.URL) *fileHandler {
 
 func (h *fileHandler) DirExists(path string) bool       { return pathExist(h.JoinPath(path)) }
 func (h *fileHandler) FileExists(path string) bool      { return pathExist(h.JoinPath(path)) }
-func (h *fileHandler) Read(path string) ([]byte, error) { return ioutil.ReadFile(h.JoinPath(path)) }
+func (h *fileHandler) Read(path string) ([]byte, error) { return os.ReadFile(h.JoinPath(path)) }
 
 func (h *fileHandler) JoinPath(path string) string {
 	return filepath.Join(h.rootDir, h.prefix, path)
@@ -273,16 +272,14 @@ func (h *s3Handler) DirExists(path string) bool  { return true }
 func (h *s3Handler) FileExists(path string) bool {
 	objectPath := h.getObjectPath(path)
 	_, err := h.mc.StatObject(h.bucketName, objectPath, minio.StatObjectOptions{})
-	if err != nil {
-		errResponse := minio.ToErrorResponse(err)
-		if errResponse.Code == "NoSuchKey" {
-			return false
-		} else {
-			glog.Errorf("Failed to verify object existence: %v", err)
-			return false
-		}
+	if err == nil {
+		return true
 	}
-	return true
+	errResponse := minio.ToErrorResponse(err)
+	if errResponse.Code != "NoSuchKey" {
+		glog.Errorf("Failed to verify object existence: %v", err)
+	}
+	return false
 }
 
 func (h *s3Handler) JoinPath(path string) string {

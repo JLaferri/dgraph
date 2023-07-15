@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ package resolve
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"sync"
 	"testing"
 
@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 
-	dgoapi "github.com/dgraph-io/dgo/v210/protos/api"
+	dgoapi "github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/graphql/schema"
 	"github.com/dgraph-io/dgraph/graphql/test"
 	"github.com/dgraph-io/dgraph/x"
@@ -123,12 +123,10 @@ func (ex *executor) Execute(ctx context.Context, req *dgoapi.Request,
 	}
 
 	res, err := json.Marshal(ex.result)
-	if err != nil {
-		panic(err)
-	}
+	x.Panic(err)
 
 	return &dgoapi.Response{
-		Json: []byte(res),
+		Json: res,
 		Uids: ex.assigned,
 		Metrics: &dgoapi.Metrics{
 			NumUids: map[string]uint64{touchedUidsKey: ex.mutationTouched}},
@@ -170,7 +168,7 @@ func complete(t *testing.T, gqlSchema schema.Schema, gqlQuery, dgResponse string
 // The []bytes built by Resolve() have some other properties, such as ordering of
 // fields, which are tested by TestResponseOrder().
 func TestGraphQLErrorPropagation(t *testing.T) {
-	b, err := ioutil.ReadFile("resolver_error_test.yaml")
+	b, err := os.ReadFile("resolver_error_test.yaml")
 	require.NoError(t, err, "Unable to read test file")
 
 	var tests []QueryCase

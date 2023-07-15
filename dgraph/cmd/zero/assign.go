@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -208,7 +208,7 @@ func (s *Server) AssignIds(ctx context.Context, num *pb.Num) (*pb.AssignedIds, e
 			// Return error after random delay.
 			//nolint:gosec // random generator in closed set does not require cryptographic precision
 			delay := rand.Intn(int(opts.limiterConfig.RefillAfter))
-			time.Sleep(time.Duration(delay) * time.Second)
+			time.Sleep(time.Duration(delay))
 			return errors.Errorf("Cannot lease UID because UID lease for the namespace %#x is "+
 				"exhausted. Please retry after some time.", ns)
 		}

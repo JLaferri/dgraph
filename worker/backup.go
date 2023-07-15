@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ import (
 	"context"
 	"math"
 
+	"github.com/golang/glog"
 	"github.com/pkg/errors"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/dgraph/protos/pb"
 	"github.com/dgraph-io/dgraph/x"
 )
@@ -35,7 +36,7 @@ type predicateSet map[string]struct{}
 // to the readTs of the current backup).
 // Groups are the IDs of the groups involved.
 type Manifest struct {
-	//Type is the type of backup, either full or incremental.
+	// Type is the type of backup, either full or incremental.
 	Type string `json:"type"`
 	// SinceTsDeprecated is kept for backward compatibility. Use readTs instead of sinceTs.
 	SinceTsDeprecated uint64 `json:"since"`
@@ -89,10 +90,6 @@ func (m *Manifest) getPredsInGroup(gid uint32) predicateSet {
 
 	predSet := make(predicateSet)
 	for _, pred := range preds {
-		if m.Version == 0 {
-			// For older versions, preds set will contain attribute without namespace.
-			pred = x.NamespaceAttr(x.GalaxyNamespace, pred)
-		}
 		predSet[pred] = struct{}{}
 	}
 	return predSet
@@ -114,14 +111,15 @@ func StoreExport(request *pb.ExportRequest, dir string, key x.Sensitive) error {
 		WithValueThreshold(1 << 10).
 		WithNumVersionsToKeep(math.MaxInt32).
 		WithEncryptionKey(key))
-
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			glog.Warningf("error closing the DB: %v", err)
+		}
+	}()
 
 	_, err = exportInternal(context.Background(), request, db, true)
-	// It is important to close the db before sending err to ch. Else, we will see a memory
-	// leak.
-	db.Close()
 	return errors.Wrapf(err, "cannot export data inside DB at %s", dir)
 }

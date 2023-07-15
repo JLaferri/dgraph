@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +21,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"testing"
 
@@ -113,7 +115,7 @@ func TestEnterpriseLicense(t *testing.T) {
 			invalidKey,
 			``,
 			``,
-			`while extracting enterprise details from the license: while reading PGP message from license file: openpgp: unsupported feature: public key version`,
+			`while extracting enterprise details from the license: while reading PGP message from license file: openpgp: unsupported feature: public key version`, //nolint:lll
 		},
 		{
 			"Using empty entrerprise license key should return an error",
@@ -132,10 +134,9 @@ func TestEnterpriseLicense(t *testing.T) {
 		require.NoError(t, err)
 
 		var enterpriseResponse responseStruct
-		responseBody, err := ioutil.ReadAll(response.Body)
+		responseBody, err := io.ReadAll(response.Body)
 		require.NoError(t, err)
-		err = json.Unmarshal(responseBody, &enterpriseResponse)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(responseBody, &enterpriseResponse))
 
 		// Check if the license is applied
 		require.Equal(t, enterpriseResponse.Code, tt.code)
@@ -177,10 +178,9 @@ func assertLicenseNotEnabled(t *testing.T, user string) {
 	require.NoError(t, err)
 
 	var stateResponse responseStruct
-	responseBody, err := ioutil.ReadAll(response.Body)
+	responseBody, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
-	err = json.Unmarshal(responseBody, &stateResponse)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(responseBody, &stateResponse))
 
 	require.Equal(t, stateResponse.License["user"], user)
 	require.Equal(t, stateResponse.License["enabled"], false)

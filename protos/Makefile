@@ -1,5 +1,5 @@
 #
-# Copyright 2022 Dgraph Labs, Inc. and Contributors
+# Copyright 2023 Dgraph Labs, Inc. and Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 #
 
 # Update BADGER_PB_VERSION when upgrading Badger major versions
-BADGER_PB_VERSION = 3
+BADGER_PB_VERSION = 4
 
-DGO_PATH    := github.com/dgraph-io/dgo/v210
+DGO_PATH    := github.com/dgraph-io/dgo/v230
 BADGER_PATH := github.com/dgraph-io/badger/v${BADGER_PB_VERSION}
 GOGO_PATH   := github.com/gogo/protobuf
 

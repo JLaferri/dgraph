@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,11 @@ import (
 	"context"
 	"expvar"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -36,13 +36,14 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/spf13/viper"
 	ostats "go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.opencensus.io/trace"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/ristretto/z"
 )
 
@@ -432,12 +433,15 @@ func init() {
 
 	CheckfNoTrace(view.Register(allViews...))
 
-	prometheus.MustRegister(NewBadgerCollector())
+	promRegistry := prometheus.NewRegistry()
+	promRegistry.MustRegister(NewBadgerCollector())
+	promRegistry.MustRegister(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(
+		collectors.GoRuntimeMetricsRule{Matcher: regexp.MustCompile("/.*")})))
+	promRegistry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
 	pe, err := oc_prom.NewExporter(oc_prom.Options{
-		// DefaultRegisterer includes a ProcessCollector for process_* metrics, a GoCollector for
-		// go_* metrics, and the badger_* metrics.
-		Registry:  prometheus.DefaultRegisterer.(*prometheus.Registry),
+		// includes a process_* metrics, a GoCollector for go_* metrics, and the badger_* metrics.
+		Registry:  promRegistry,
 		Namespace: "dgraph",
 		OnError:   func(err error) { glog.Errorf("%v", err) },
 	})
@@ -451,7 +455,7 @@ func init() {
 
 // NewBadgerCollector returns a prometheus Collector for Badger metrics from expvar.
 func NewBadgerCollector() prometheus.Collector {
-	return prometheus.NewExpvarCollector(map[string]*prometheus.Desc{
+	return collectors.NewExpvarCollector(map[string]*prometheus.Desc{
 		"badger_v3_disk_reads_total": prometheus.NewDesc(
 			"badger_disk_reads_total",
 			"Number of cumulative reads by Badger",
@@ -492,6 +496,11 @@ func NewBadgerCollector() prometheus.Collector {
 			"Total number of puts",
 			nil, nil,
 		),
+		"badger_v3_blocked_puts_total": prometheus.NewDesc(
+			"badger_blocked_puts_total",
+			"Total number of blocked puts",
+			nil, nil,
+		),
 		"badger_v3_memtable_gets_total": prometheus.NewDesc(
 			"badger_memtable_gets_total",
 			"Total number of memtable gets",
@@ -506,6 +515,16 @@ func NewBadgerCollector() prometheus.Collector {
 			"badger_vlog_size_bytes",
 			"Size of the value log in bytes",
 			[]string{"dir"}, nil,
+		),
+		"badger_v3_pending_writes_total": prometheus.NewDesc(
+			"badger_pending_writes_total",
+			"Total number of pending writes",
+			[]string{"dir"}, nil,
+		),
+		"badger_v3_compactions_current": prometheus.NewDesc(
+			"badger_compactions_current",
+			"Number of tables being actively compacted",
+			nil, nil,
 		),
 	})
 }
@@ -579,27 +598,15 @@ func RegisterExporters(conf *viper.Viper, service string) {
 func MonitorCacheHealth(db *badger.DB, closer *z.Closer) {
 	defer closer.Done()
 
-	record := func(ct string) {
-		switch ct {
-		case "pstore-block":
-			metrics := db.BlockCacheMetrics()
-			ostats.Record(context.Background(), PBlockHitRatio.M(metrics.Ratio()))
-		case "pstore-index":
-			metrics := db.IndexCacheMetrics()
-			ostats.Record(context.Background(), PIndexHitRatio.M(metrics.Ratio()))
-		default:
-			panic("invalid cache type")
-		}
-	}
-
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+	backgroundContext := context.Background()
 
 	for {
 		select {
 		case <-ticker.C:
-			record("pstore-block")
-			record("pstore-index")
+			ostats.Record(backgroundContext, PBlockHitRatio.M(db.BlockCacheMetrics().Ratio()))
+			ostats.Record(backgroundContext, PIndexHitRatio.M(db.IndexCacheMetrics().Ratio()))
 		case <-closer.HasBeenClosed():
 			return
 		}
@@ -678,7 +685,7 @@ func getMemUsage() int {
 		return megs
 	}
 
-	contents, err := ioutil.ReadFile("/proc/self/stat")
+	contents, err := os.ReadFile("/proc/self/stat")
 	if err != nil {
 		glog.Errorf("Can't read the proc file. Err: %v\n", err)
 		return 0

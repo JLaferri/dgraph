@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package common
 
 import (
 	"context"
-	"io/ioutil"
 	"math"
 	"os"
 	"path/filepath"
@@ -28,14 +27,14 @@ import (
 	"github.com/minio/minio-go/v6"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/testutil"
 )
 
 var rootDir = "./data"
 var rootBucket = "data"
 
-type suite struct {
+type bsuite struct {
 	t    *testing.T
 	opts suiteOpts
 }
@@ -54,22 +53,22 @@ type bulkOpts struct {
 	forceNs uint64
 }
 
-func newSuiteInternal(t *testing.T, opts suiteOpts) *suite {
+func newSuiteInternal(t *testing.T, opts suiteOpts) *bsuite {
 	if testing.Short() {
 		t.Skip("Skipping system test with long runtime.")
 	}
 
-	s := &suite{
+	s := &bsuite{
 		t:    t,
 		opts: opts,
 	}
 	require.NoError(s.t, makeDirEmpty(rootDir))
 	rdfFile := filepath.Join(rootDir, "rdfs.rdf")
-	require.NoError(s.t, ioutil.WriteFile(rdfFile, []byte(opts.rdfs), 0644))
+	require.NoError(s.t, os.WriteFile(rdfFile, []byte(opts.rdfs), 0644))
 	schemaFile := filepath.Join(rootDir, "schema.txt")
-	require.NoError(s.t, ioutil.WriteFile(schemaFile, []byte(opts.schema), 0644))
+	require.NoError(s.t, os.WriteFile(schemaFile, []byte(opts.schema), 0644))
 	gqlSchemaFile := filepath.Join(rootDir, "gql_schema.txt")
-	require.NoError(s.t, ioutil.WriteFile(gqlSchemaFile, []byte(opts.gqlSchema), 0644))
+	require.NoError(s.t, os.WriteFile(gqlSchemaFile, []byte(opts.gqlSchema), 0644))
 
 	var schemaPath, dataPath, gqlSchemaPath string = "schema.txt", "rdfs.rdf", "gql_schema.txt"
 
@@ -100,7 +99,7 @@ func minioPath(path string) string {
 	return "minio://" + testutil.ContainerAddr("minio", 9001) + "/data/" + path + "?secure=false"
 }
 
-func newLiveOnlySuite(t *testing.T, schema, rdfs, gqlSchema string) *suite {
+func newLiveOnlySuite(t *testing.T, schema, rdfs, gqlSchema string) *bsuite {
 	opts := suiteOpts{
 		schema:    schema,
 		gqlSchema: gqlSchema,
@@ -110,7 +109,7 @@ func newLiveOnlySuite(t *testing.T, schema, rdfs, gqlSchema string) *suite {
 	return newSuiteInternal(t, opts)
 }
 
-func newBulkOnlySuite(t *testing.T, schema, rdfs, gqlSchema string) *suite {
+func newBulkOnlySuite(t *testing.T, schema, rdfs, gqlSchema string) *bsuite {
 	opts := suiteOpts{
 		schema:    schema,
 		gqlSchema: gqlSchema,
@@ -121,17 +120,17 @@ func newBulkOnlySuite(t *testing.T, schema, rdfs, gqlSchema string) *suite {
 	return newSuiteInternal(t, opts)
 }
 
-func newSuiteFromFile(t *testing.T, schemaFile, rdfFile, gqlSchemaFile string) *suite {
+func newSuiteFromFile(t *testing.T, schemaFile, rdfFile, gqlSchemaFile string) *bsuite {
 	if testing.Short() {
 		t.Skip("Skipping system test with long runtime.")
 	}
-	s := &suite{t: t}
+	s := &bsuite{t: t}
 
 	s.setup(t, schemaFile, rdfFile, gqlSchemaFile)
 	return s
 }
 
-func (s *suite) setup(t *testing.T, schemaFile, rdfFile, gqlSchemaFile string) {
+func (s *bsuite) setup(t *testing.T, schemaFile, rdfFile, gqlSchemaFile string) {
 	var env []string
 	if s.opts.remote {
 		env = append(env, "MINIO_ACCESS_KEY=accesskey", "MINIO_SECRET_KEY=secretkey")
@@ -175,7 +174,7 @@ func makeDirEmpty(dir string) error {
 	return os.MkdirAll(dir, 0755)
 }
 
-func (s *suite) cleanup(t *testing.T) {
+func (s *bsuite) cleanup(t *testing.T) {
 	// NOTE: Shouldn't raise any errors here or fail a test, since this is
 	// called when we detect an error (don't want to mask the original problem).
 	if s.opts.bulkSuite {

@@ -1,5 +1,7 @@
+//go:build integration
+
 /*
- *    Copyright 2022 Dgraph Labs, Inc. and Contributors
+ *    Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +16,7 @@
  * limitations under the License.
  */
 
+//nolint:lll
 package auth
 
 import (
@@ -237,14 +240,9 @@ func TestAuth_AddOnTypeWithRBACRuleOnInterface(t *testing.T) {
 			require.Contains(t, gqlResponse.Errors[0].Message, "authorization failed")
 			continue
 		}
-
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		opt := cmpopts.IgnoreFields(FbPost{}, "Id")
 		opt1 := cmpopts.IgnoreFields(Author{}, "Id")
@@ -337,12 +335,8 @@ func TestAuth_AddOnTypeWithGraphTraversalRuleOnInterface(t *testing.T) {
 		}
 
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 		opt := cmpopts.IgnoreFields(Question{}, "Id")
 		opt1 := cmpopts.IgnoreFields(Author{}, "Id")
 		if diff := cmp.Diff(expected, result, opt, opt1); diff != "" {
@@ -448,13 +442,9 @@ func TestAddDeepFilter(t *testing.T) {
 			require.Contains(t, gqlResponse.Errors[0].Message, "authorization failed")
 			continue
 		}
-
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		opt := cmpopts.IgnoreFields(Column{}, "ColID")
 		opt1 := cmpopts.IgnoreFields(Project{}, "ProjID")
@@ -551,13 +541,9 @@ func TestAddOrRBACFilter(t *testing.T) {
 			require.Contains(t, gqlResponse.Errors[0].Message, "authorization failed")
 			continue
 		}
-
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		opt := cmpopts.IgnoreFields(Project{}, "ProjID")
 		if diff := cmp.Diff(expected, result, opt); diff != "" {
@@ -630,13 +616,9 @@ func TestAddAndRBACFilterMultiple(t *testing.T) {
 			require.Contains(t, gqlResponse.Errors[0].Message, "authorization failed")
 			continue
 		}
-
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		opt := cmpopts.IgnoreFields(Issue{}, "Id")
 		if diff := cmp.Diff(expected, result, opt); diff != "" {
@@ -705,13 +687,9 @@ func TestAddAndRBACFilter(t *testing.T) {
 			require.Contains(t, gqlResponse.Errors[0].Message, "authorization failed")
 			continue
 		}
-
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		opt := cmpopts.IgnoreFields(Issue{}, "Id")
 		if diff := cmp.Diff(expected, result, opt); diff != "" {
@@ -809,13 +787,9 @@ func TestAddComplexFilter(t *testing.T) {
 			require.Contains(t, gqlResponse.Errors[0].Message, "authorization failed")
 			continue
 		}
-
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		opt := cmpopts.IgnoreFields(Movie{}, "Id")
 		if diff := cmp.Diff(expected, result, opt); diff != "" {
@@ -877,13 +851,9 @@ func TestAddRBACFilter(t *testing.T) {
 			require.Contains(t, gqlResponse.Errors[0].Message, "authorization failed")
 			continue
 		}
-
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		opt := cmpopts.IgnoreFields(Log{}, "Id")
 		if diff := cmp.Diff(expected, result, opt); diff != "" {
@@ -941,13 +911,9 @@ func TestAddGQLOnly(t *testing.T) {
 			require.Contains(t, gqlResponse.Errors[0].Message, "authorization failed")
 			continue
 		}
-
 		common.RequireNoGQLErrors(t, gqlResponse)
-
-		err := json.Unmarshal([]byte(tcase.result), &expected)
-		require.NoError(t, err)
-		err = json.Unmarshal(gqlResponse.Data, &result)
-		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal([]byte(tcase.result), &expected))
+		require.NoError(t, json.Unmarshal(gqlResponse.Data, &result))
 
 		opt := cmpopts.IgnoreFields(common.UserSecret{}, "Id")
 		if diff := cmp.Diff(expected, result, opt); diff != "" {

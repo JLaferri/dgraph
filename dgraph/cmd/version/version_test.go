@@ -1,7 +1,6 @@
 package version
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,15 +12,10 @@ import (
 
 // Test `dgraph version` with an empty config file.
 func TestDgraphVersion(t *testing.T) {
-	tmpPath, err := ioutil.TempDir("", "test.tmp-")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpPath)
-
+	tmpPath := t.TempDir()
 	configPath := filepath.Join(tmpPath, "config.yml")
 	configFile, err := os.Create(configPath)
 	require.NoError(t, err)
 	defer configFile.Close()
-
-	err = testutil.Exec(testutil.DgraphBinaryPath(), "version", "--config", configPath)
-	require.NoError(t, err)
+	require.NoError(t, testutil.Exec(testutil.DgraphBinaryPath(), "version", "--config", configPath))
 }

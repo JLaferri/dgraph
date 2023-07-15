@@ -1,8 +1,27 @@
 name: ci-dgraph-load-tests
 on:
   push:
+    paths-ignore:
+      - '.github/CODEOWNERS'
+      - '.vscode/**'
+      - 'compose/**'
+      - 'contrib/systemd/**'
+      - 'licenses/**'
+      - 'paper/**'
+      - 'present/**'
+      - 'RFC/**'
+      - 'static/**'
+      - 'wiki/**'
+      - '**/**.dockerignore'
+      - '**/**.gitignore'
+      - '**/**.md'
+      - '**/**.png'
+      - '**/**.jpg'
+      - '**/**.gif'
+      - '**/**.ini'
     branches:
       - main
+      - 'release/**'
   pull_request:
     types:
       - opened
@@ -11,8 +30,9 @@ on:
       - ready_for_review
     branches:
       - main
+      - 'release/**'
   schedule:
-    - cron: "0 0,12 * * *" # 2-runs per day
+    - cron: "0 0,6,12,18 * * *"
 jobs:
   dgraph-load-tests:
     if: github.event.pull_request.draft == false

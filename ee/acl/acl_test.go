@@ -1,14 +1,14 @@
-//go:build !oss
-// +build !oss
+//go:build !oss && integration
+// +build !oss,integration
 
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Dgraph Community License (the "License"); you
  * may not use this file except in compliance with the License. You
  * may obtain a copy of the License at
  *
- *     https://github.com/dgraph-io/dgraph/blob/master/licenses/DCL.txt
+ *     https://github.com/dgraph-io/dgraph/blob/main/licenses/DCL.txt
  */
 
 package acl
@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -27,8 +26,8 @@ import (
 	"github.com/golang/glog"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210"
-	"github.com/dgraph-io/dgo/v210/protos/api"
+	"github.com/dgraph-io/dgo/v230"
+	"github.com/dgraph-io/dgo/v230/protos/api"
 	"github.com/dgraph-io/dgraph/testutil"
 	"github.com/dgraph-io/dgraph/x"
 )
@@ -38,7 +37,9 @@ var (
 	userpassword = "simplepassword"
 )
 
-func makeRequestAndRefreshTokenIfNecessary(t *testing.T, token *testutil.HttpToken, params testutil.GraphQLParams) *testutil.GraphQLResponse {
+func makeRequestAndRefreshTokenIfNecessary(t *testing.T, token *testutil.HttpToken,
+	params testutil.GraphQLParams) *testutil.GraphQLResponse {
+
 	resp := testutil.MakeGQLRequestWithAccessJwt(t, &params, token.AccessJwt)
 	if len(resp.Errors) == 0 || !strings.Contains(resp.Errors.Error(), "Token is expired") {
 		return resp
@@ -55,6 +56,7 @@ func makeRequestAndRefreshTokenIfNecessary(t *testing.T, token *testutil.HttpTok
 	token.RefreshToken = newtoken.RefreshToken
 	return testutil.MakeGQLRequestWithAccessJwt(t, &params, token.AccessJwt)
 }
+
 func createUser(t *testing.T, token *testutil.HttpToken, username, password string) *testutil.GraphQLResponse {
 	addUser := `
 	mutation addUser($name: String!, $pass: String!) {
@@ -98,12 +100,13 @@ func checkUserCount(t *testing.T, resp []byte, expected int) {
 	}
 
 	var r Response
-	err := json.Unmarshal(resp, &r)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp, &r))
 	require.Equal(t, expected, len(r.AddUser.User))
 }
 
-func deleteUser(t *testing.T, token *testutil.HttpToken, username string, confirmDeletion bool) *testutil.GraphQLResponse {
+func deleteUser(t *testing.T, token *testutil.HttpToken, username string,
+	confirmDeletion bool) *testutil.GraphQLResponse {
+
 	delUser := `
 	mutation deleteUser($name: String!) {
 		deleteUser(filter: {name: {eq: $name}}) {
@@ -612,8 +615,7 @@ func createGroupWithRules(t *testing.T, token *testutil.HttpToken, name string, 
 			Group []group
 		}
 	}
-	err := json.Unmarshal(resp.Data, &addGroupResp)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp.Data, &addGroupResp))
 	require.Len(t, addGroupResp.AddGroup.Group, 1)
 
 	return &addGroupResp.AddGroup.Group[0]
@@ -666,8 +668,7 @@ func updateGroup(t *testing.T, token *testutil.HttpToken, name string, setRules 
 			Group []group
 		}
 	}
-	err := json.Unmarshal(resp.Data, &result)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp.Data, &result))
 	require.Len(t, result.UpdateGroup.Group, 1)
 
 	return &result.UpdateGroup.Group[0]
@@ -683,8 +684,7 @@ func checkGroupCount(t *testing.T, resp []byte, expected int) {
 	}
 
 	var r Response
-	err := json.Unmarshal(resp, &r)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp, &r))
 	require.Equal(t, expected, len(r.AddGroup.Group))
 }
 
@@ -732,8 +732,7 @@ func addToGroup(t *testing.T, token *testutil.HttpToken, userName, group string)
 			Name string
 		}
 	}
-	err := json.Unmarshal(resp.Data, &result)
-	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(resp.Data, &result))
 
 	// There should be a user in response.
 	require.Len(t, result.UpdateUser.User, 1)
@@ -954,8 +953,7 @@ func TestUnauthorizedDeletion(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	_, err = deleteUsingNQuad(userClient, "<"+nodeUID+">", "<"+unAuthPred+">", "*")
 
@@ -989,8 +987,7 @@ func TestGuardianAccess(t *testing.T) {
 	time.Sleep(defaultTimeToSleep)
 	gClient, err := testutil.DgraphClient(testutil.SockAddr)
 	require.NoError(t, err, "Error while creating client")
-
-	gClient.LoginIntoNamespace(ctx, "guardian", "guardianpass", x.GalaxyNamespace)
+	require.NoError(t, gClient.LoginIntoNamespace(ctx, "guardian", "guardianpass", x.GalaxyNamespace))
 
 	mutString := fmt.Sprintf("<%s> <unauthpred> \"testdata\" .", nodeUID)
 	mutation = &api.Mutation{SetNquads: []byte(mutString), CommitNow: true}
@@ -1130,8 +1127,7 @@ func TestQueryRemoveUnauthorizedPred(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	tests := []struct {
 		input       string
@@ -1279,15 +1275,15 @@ func TestExpandQueryWithACLPermissions(t *testing.T) {
 	// Test that groot has access to all the predicates
 	resp, err := dg.NewReadOnlyTxn().Query(ctx, query)
 	require.NoError(t, err, "Error while querying data")
-	testutil.CompareJSON(t, `{"me":[{"name":"RandomGuy","age":23, "nickname":"RG"},{"name":"RandomGuy2","age":25, "nickname":"RG2"}]}`,
+	testutil.CompareJSON(t,
+		`{"me":[{"name":"RandomGuy","age":23, "nickname":"RG"},{"name":"RandomGuy2","age":25, "nickname":"RG2"}]}`,
 		string(resp.GetJson()))
 
 	userClient, err := testutil.DgraphClient(testutil.SockAddr)
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	// Query via user when user has no permissions
 	testutil.PollTillPassOrTimeout(t, userClient, query, `{}`, timeout)
@@ -1334,7 +1330,8 @@ func TestExpandQueryWithACLPermissions(t *testing.T) {
 	addRulesToGroup(t, token, devGroup, []rule{{"age", Write.Code}, {"name", Read.Code}, {"nickname", Read.Code}})
 
 	testutil.PollTillPassOrTimeout(t, userClient, query,
-		`{"me":[{"name":"RandomGuy","age":23, "nickname":"RG"},{"name":"RandomGuy2","age":25, "nickname":"RG2"}]}`, timeout)
+		`{"me":[{"name":"RandomGuy","age":23, "nickname":"RG"},{"name":"RandomGuy2","age":25, "nickname":"RG2"}]}`,
+		timeout)
 
 }
 func TestDeleteQueryWithACLPermissions(t *testing.T) {
@@ -1396,8 +1393,11 @@ func TestDeleteQueryWithACLPermissions(t *testing.T) {
 	// Test that groot has access to all the predicates
 	resp, err = dg.NewReadOnlyTxn().Query(ctx, query)
 	require.NoError(t, err, "Error while querying data")
-	testutil.CompareJSON(t, `{"q1":[{"name":"RandomGuy","age":23, "nickname": "RG"},{"name":"RandomGuy2","age":25,  "nickname": "RG2"}]}`,
-		string(resp.GetJson()))
+	testutil.CompareJSON(
+		t,
+		`{"q1":[{"name":"RandomGuy","age":23, "nickname": "RG"},{"name":"RandomGuy2","age":25,  "nickname": "RG2"}]}`,
+		string(resp.GetJson()),
+	)
 
 	// Give Write Access to alice for name and age predicate
 	addRulesToGroup(t, token, devGroup, []rule{{"name", Write.Code}, {"age", Write.Code}})
@@ -1406,8 +1406,7 @@ func TestDeleteQueryWithACLPermissions(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	// delete S * * (user now has permission to name and age)
 	_, err = deleteUsingNQuad(userClient, "<"+nodeUID+">", "*", "*")
@@ -1508,8 +1507,9 @@ func TestValQueryWithACLPermissions(t *testing.T) {
 	// Test that groot has access to all the predicates
 	resp, err := dg.NewReadOnlyTxn().Query(ctx, query)
 	require.NoError(t, err, "Error while querying data")
-	testutil.CompareJSON(t, `{"q1":[{"name":"RandomGuy","age":23},{"name":"RandomGuy2","age":25}],"q2":[{"val(v)":"RandomGuy","val(a)":23}]}`,
-		string(resp.GetJson()))
+	testutil.CompareJSON(t,
+		`{"q1":[{"name":"RandomGuy","age":23},{"name":"RandomGuy2","age":25}],`+
+			`"q2":[{"val(v)":"RandomGuy","val(a)":23}]}`, string(resp.GetJson()))
 
 	// All test cases
 	tests := []struct {
@@ -1582,7 +1582,7 @@ func TestValQueryWithACLPermissions(t *testing.T) {
 
 			"alice has access to name and age",
 			`{"q1":[{"name":"RandomGuy","age":23},{"name":"RandomGuy2","age":25}],
-			"q2":[{"name":"RandomGuy2","val(n)":"RandomGuy2","val(a)":25},{"name":"RandomGuy","val(n)":"RandomGuy","val(a)":23}]}`,
+			"q2":[{"name":"RandomGuy2","val(n)":"RandomGuy2","val(a)":25},{"name":"RandomGuy","val(n)":"RandomGuy","val(a)":23}]}`, //nolint:lll
 		},
 		{
 			`{
@@ -1612,8 +1612,7 @@ func TestValQueryWithACLPermissions(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	// Query via user when user has no permissions
 	for _, tc := range tests {
@@ -1733,8 +1732,9 @@ func TestAllPredsPermission(t *testing.T) {
 	// Test that groot has access to all the predicates
 	resp, err := dg.NewReadOnlyTxn().Query(ctx, query)
 	require.NoError(t, err, "Error while querying data")
-	testutil.CompareJSON(t, `{"q1":[{"name":"RandomGuy","age":23},{"name":"RandomGuy2","age":25}],"q2":[{"val(v)":"RandomGuy","val(a)":23}]}`,
-		string(resp.GetJson()))
+	testutil.CompareJSON(t,
+		`{"q1":[{"name":"RandomGuy","age":23},{"name":"RandomGuy2","age":25}],`+
+			`"q2":[{"val(v)":"RandomGuy","val(a)":23}]}`, string(resp.GetJson()))
 
 	// All test cases
 	tests := []struct {
@@ -1774,8 +1774,7 @@ func TestAllPredsPermission(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	// Query via user when user has no permissions
 	for _, tc := range tests {
@@ -1843,8 +1842,7 @@ func TestNewACLPredicates(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	queryTests := []struct {
 		input       string
@@ -1881,11 +1879,11 @@ func TestNewACLPredicates(t *testing.T) {
 		tc := tc // capture range variable
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
-			ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 			defer cancel()
 
 			resp, err := userClient.NewTxn().Query(ctx, tc.input)
-			require.Nil(t, err)
+			require.NoError(t, err)
 			testutil.CompareJSON(t, tc.output, string(resp.Json))
 		})
 	}
@@ -1969,8 +1967,7 @@ func TestDeleteRule(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	queryName := "{me(func: has(name)) {name}}"
 	resp, err := userClient.NewReadOnlyTxn().Query(ctx, queryName)
@@ -2179,9 +2176,7 @@ func TestQueryUserInfo(t *testing.T) {
 
 	userClient, err := testutil.DgraphClient(testutil.SockAddr)
 	require.NoError(t, err)
-
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	resp, err := userClient.NewReadOnlyTxn().Query(ctx, query)
 	require.NoError(t, err, "Error while querying ACL")
@@ -2787,8 +2782,8 @@ func TestHealthForAcl(t *testing.T) {
 		}
 	}
 	err := json.Unmarshal(resp.Data, &guardianResp)
-
 	require.NoError(t, err, "health request failed")
+
 	// we have 9 instances of alphas/zeros in teamcity environment
 	require.Len(t, guardianResp.Health, 9)
 	for _, v := range guardianResp.Health {
@@ -3188,8 +3183,7 @@ func TestAllowUIDAccess(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(defaultTimeToSleep)
 
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	uidQuery := `
 	{
@@ -3201,7 +3195,7 @@ func TestAllowUIDAccess(t *testing.T) {
 	`
 
 	resp, err := userClient.NewReadOnlyTxn().Query(ctx, uidQuery)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	testutil.CompareJSON(t, `{"me":[{"name":"100th User", "uid": "0x64"}]}`, string(resp.GetJson()))
 }
 
@@ -3217,8 +3211,7 @@ func TestAddNewPredicate(t *testing.T) {
 
 	userClient, err := testutil.DgraphClient(testutil.SockAddr)
 	require.NoError(t, err)
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	// Alice doesn't have access to create new predicate.
 	err = userClient.Alter(ctx, &api.Operation{
@@ -3429,8 +3422,7 @@ func TestMutationWithValueVar(t *testing.T) {
 
 	userClient, err := testutil.DgraphClient(testutil.SockAddr)
 	require.NoError(t, err)
-	err = userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace)
-	require.NoError(t, err)
+	require.NoError(t, userClient.LoginIntoNamespace(ctx, userid, userpassword, x.GalaxyNamespace))
 
 	_, err = userClient.NewTxn().Do(ctx, &api.Request{
 		Query:     query,
@@ -3613,5 +3605,5 @@ func TestDropAllShouldResetGuardiansAndGroot(t *testing.T) {
 func TestMain(m *testing.M) {
 	adminEndpoint = "http://" + testutil.SockAddrHttp + "/admin"
 	fmt.Printf("Using adminEndpoint for acl package: %s\n", adminEndpoint)
-	os.Exit(m.Run())
+	m.Run()
 }

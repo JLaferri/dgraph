@@ -2,13 +2,13 @@
 // +build !oss
 
 /*
- * Copyright 2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Dgraph Community License (the "License"); you
  * may not use this file except in compliance with the License. You
  * may obtain a copy of the License at
  *
- *     https://github.com/dgraph-io/dgraph/blob/master/licenses/DCL.txt
+ *     https://github.com/dgraph-io/dgraph/blob/main/licenses/DCL.txt
  */
 
 package worker
@@ -16,7 +16,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"net/url"
 	"os"
@@ -31,8 +30,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	"github.com/dgraph-io/badger/v3"
-	"github.com/dgraph-io/badger/v3/options"
+	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/dgraph/conn"
 	"github.com/dgraph-io/dgraph/ee"
 	"github.com/dgraph-io/dgraph/posting"
@@ -47,9 +46,7 @@ const (
 
 // verifyRequest verifies that the manifest satisfies the requirements to process the given
 // restore request.
-func verifyRequest(h UriHandler, uri *url.URL, req *pb.RestoreRequest,
-	currentGroups []uint32) error {
-
+func verifyRequest(h UriHandler, uri *url.URL, req *pb.RestoreRequest, currentGroups []uint32) error {
 	manifests, err := getManifestsToRestore(h, uri, req)
 	if err != nil {
 		return errors.Wrapf(err, "while retrieving manifests")
@@ -246,16 +243,23 @@ func handleRestoreProposal(ctx context.Context, req *pb.RestoreRequest, pidx uin
 		return errors.Errorf("nil restore request")
 	}
 
-	// Drop all the current data. This also cancels all existing transactions.
-	dropProposal := pb.Proposal{
-		Mutations: &pb.Mutations{
-			GroupId: req.GroupId,
-			StartTs: req.RestoreTs,
-			DropOp:  pb.Mutations_ALL,
-		},
+	if req.IncrementalFrom == 1 {
+		return errors.Errorf("Incremental restore must not include full backup")
 	}
-	if err := groups().Node.applyMutations(ctx, &dropProposal); err != nil {
-		return err
+
+	// Clean up the cluster if it is a full backup restore.
+	if req.IncrementalFrom == 0 {
+		// Drop all the current data. This also cancels all existing transactions.
+		dropProposal := pb.Proposal{
+			Mutations: &pb.Mutations{
+				GroupId: req.GroupId,
+				StartTs: req.RestoreTs,
+				DropOp:  pb.Mutations_ALL,
+			},
+		}
+		if err := groups().Node.applyMutations(ctx, &dropProposal); err != nil {
+			return err
+		}
 	}
 
 	// TODO: after the drop, the tablets for the predicates stored in this group's
@@ -281,37 +285,41 @@ func handleRestoreProposal(ctx context.Context, req *pb.RestoreRequest, pidx uin
 	if err != nil {
 		return errors.Wrapf(err, "cannot get backup manifests")
 	}
+
+	// filter manifests that needs to be restored
+	mfsToRestore := manifests[:0]
+	for _, m := range manifests {
+		if (req.BackupNum == 0 || m.BackupNum <= req.BackupNum) &&
+			(req.IncrementalFrom == 0 || m.BackupNum >= req.IncrementalFrom) {
+
+			mfsToRestore = append(mfsToRestore, m)
+		}
+	}
+	manifests = mfsToRestore
+
 	if len(manifests) == 0 {
 		return errors.Errorf("no backup manifests found at location %s", req.Location)
 	}
 
 	lastManifest := manifests[0]
-	preds, ok := lastManifest.Groups[req.GroupId]
-
-	// Version is 0 if the backup was taken on an old version (v20.11).
-	if lastManifest.Version == 0 {
-		tmp := make([]string, 0, len(preds))
-		for _, pred := range preds {
-			tmp = append(tmp, x.GalaxyAttr(pred))
-		}
-		preds = tmp
-	}
-
+	restorePreds, ok := lastManifest.Groups[req.GroupId]
 	if !ok {
-		return errors.Errorf("backup manifest does not contain information for group ID %d",
-			req.GroupId)
+		return errors.Errorf("backup manifest does not contain information for group ID %d", req.GroupId)
 	}
-	for _, pred := range preds {
-		// Force the tablet to be moved to this group, even if it's currently being served
-		// by another group.
-		if tablet, err := groups().ForceTablet(pred); err != nil {
+
+	for _, pred := range restorePreds {
+		// Force the tablet to be moved to this group, even
+		// if it's currently being served by another group.
+		tablet, err := groups().ForceTablet(pred)
+		if err != nil {
 			return errors.Wrapf(err, "cannot create tablet for restored predicate %s", pred)
-		} else if tablet.GetGroupId() != req.GroupId {
+		}
+		if tablet.GetGroupId() != req.GroupId {
 			return errors.Errorf("cannot assign tablet for pred %s to group %d", pred, req.GroupId)
 		}
 	}
 
-	mapDir, err := ioutil.TempDir(x.WorkerConfig.TmpDir, "restore-map")
+	mapDir, err := os.MkdirTemp(x.WorkerConfig.TmpDir, "restore-map")
 	x.Check(err)
 	defer os.RemoveAll(mapDir)
 	glog.Infof("Created temporary map directory: %s\n", mapDir)
@@ -323,10 +331,54 @@ func handleRestoreProposal(ctx context.Context, req *pb.RestoreRequest, pidx uin
 	}
 	glog.Infof("Backup map phase is complete. Map result is: %+v\n", mapRes)
 
-	// Reduce the map to pstore using stream writer.
 	sw := pstore.NewStreamWriter()
-	if err := sw.Prepare(); err != nil {
-		return errors.Wrapf(err, "while preparing DB")
+	defer sw.Cancel()
+
+	prepareForReduce := func() error {
+		if req.IncrementalFrom == 0 {
+			return sw.Prepare()
+		}
+		// If there is a drop all in between the last restored backup and the incremental backups
+		// then drop everything before restoring incremental backups.
+		if mapRes.shouldDropAll {
+			if err := pstore.DropAll(); err != nil {
+				return errors.Wrap(err, "failed to reduce incremental restore map")
+			}
+		}
+
+		dropAttrs := [][]byte{x.SchemaPrefix(), x.TypePrefix()}
+		for ns := range mapRes.dropNs {
+			prefix := x.DataPrefix(ns)
+			dropAttrs = append(dropAttrs, prefix)
+		}
+		for attr := range mapRes.dropAttr {
+			dropAttrs = append(dropAttrs, x.PredicatePrefix(attr))
+		}
+
+		// Any predicate which is currently in the state but not in the latest manifest should
+		// be dropped. It is possible that the tablet would have been moved in between the last
+		// restored backup and the incremental backups being restored.
+		clusterPreds := schema.State().Predicates()
+		validPreds := make(map[string]struct{})
+		for _, pred := range restorePreds {
+			validPreds[pred] = struct{}{}
+		}
+		for _, pred := range clusterPreds {
+			if _, ok := validPreds[pred]; !ok {
+				dropAttrs = append(dropAttrs, x.PredicatePrefix(pred))
+			}
+		}
+		if err := pstore.DropPrefix(dropAttrs...); err != nil {
+			return errors.Wrap(err, "failed to reduce incremental restore map")
+		}
+		if err := sw.PrepareIncremental(); err != nil {
+			return errors.Wrapf(err, "while preparing DB")
+		}
+		return nil
+	}
+
+	if err := prepareForReduce(); err != nil {
+		return errors.Wrap(err, "while preparing for reduce phase")
 	}
 	if err := RunReducer(sw, mapDir); err != nil {
 		return errors.Wrap(err, "failed to reduce restore map")
@@ -347,9 +399,12 @@ func handleRestoreProposal(ctx context.Context, req *pb.RestoreRequest, pidx uin
 
 	ResetAclCache()
 
-	// reset gql schema
+	// Reset gql schema only when the restore is not partial, so that after this restore
+	// the cluster can be in non-draining mode and hence gqlSchema can be lazy loaded.
 	glog.Info("reseting local gql schema store")
-	ResetGQLSchemaStore()
+	if !req.IsPartial {
+		ResetGQLSchemaStore()
+	}
 
 	// Propose a snapshot immediately after all the work is done to prevent the restore
 	// from being replayed.
@@ -468,13 +523,13 @@ func RunOfflineRestore(dir, location, backupId, keyFile string, key x.Sensitive,
 		return LoadResult{Err: errors.Wrapf(err, "cannot retrieve manifests")}
 	}
 	if len(keyFile) > 0 {
-		key, err = ioutil.ReadFile(keyFile)
+		key, err = os.ReadFile(keyFile)
 		if err != nil {
 			return LoadResult{Err: errors.Wrapf(err, "RunRestore failed to read enc-key")}
 		}
 	}
 
-	mapDir, err := ioutil.TempDir(x.WorkerConfig.TmpDir, "restore-map")
+	mapDir, err := os.MkdirTemp(x.WorkerConfig.TmpDir, "restore-map")
 	x.Check(err)
 	defer os.RemoveAll(mapDir)
 
@@ -514,7 +569,7 @@ func RunOfflineRestore(dir, location, backupId, keyFile string, key x.Sensitive,
 		if err := sw.Flush(); err != nil {
 			return LoadResult{Err: errors.Wrap(err, "while stream writer flush")}
 		}
-		if err := x.WriteGroupIdFile(pdir, uint32(gid)); err != nil {
+		if err := x.WriteGroupIdFile(pdir, gid); err != nil {
 			return LoadResult{Err: errors.Wrap(err, "RunRestore failed to write group id file")}
 		}
 	}

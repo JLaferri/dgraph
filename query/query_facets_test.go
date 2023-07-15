@@ -1,5 +1,7 @@
+//go:build integration || cloud || upgrade
+
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +16,7 @@
  * limitations under the License.
  */
 
+//nolint:lll
 package query
 
 import (
@@ -23,16 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	facetSetupDone = false
-)
-
 func populateClusterWithFacets() error {
-	// Return immediately if the setup has been performed already.
-	if facetSetupDone {
-		return nil
-	}
-
 	triples := `
 		<1> <name> "Michelle"@en (origin = "french") .
 		<25> <name> "Daryl Dixon" .
@@ -99,15 +93,11 @@ func populateClusterWithFacets() error {
 	triples += fmt.Sprintf("<34> <friend> <31> %s .\n", friendFacets8)
 	triples += fmt.Sprintf("<34> <friend> <25> %s .\n", friendFacets9)
 
-	err := addTriplesToCluster(triples)
-
-	// Mark the setup as done so that the next tests do not have to perform it.
-	facetSetupDone = true
-	return err
+	return addTriplesToCluster(triples)
 }
 
 func TestFacetsVarAllofterms(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(31)) {
@@ -127,7 +117,7 @@ func TestFacetsVarAllofterms(t *testing.T) {
 }
 
 func TestFacetsWithVarEq(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find family of 1
 	query := `
 		query works($family : bool = true){
@@ -148,7 +138,7 @@ func TestFacetsWithVarEq(t *testing.T) {
 }
 
 func TestFacetWithVarLe(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 
 	query := `
 		query works($age : int = 35) {
@@ -169,7 +159,7 @@ func TestFacetWithVarLe(t *testing.T) {
 }
 
 func TestFacetWithVarGt(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 
 	query := `
 		query works($age : int = "32") {
@@ -190,7 +180,7 @@ func TestFacetWithVarGt(t *testing.T) {
 }
 
 func TestRetrieveFacetsSimple(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(0x1)) {
@@ -207,7 +197,7 @@ func TestRetrieveFacetsSimple(t *testing.T) {
 }
 
 func TestOrderFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// to see how friend @facets are positioned in output.
 	query := `
 		{
@@ -251,7 +241,7 @@ func TestOrderFacets(t *testing.T) {
 }
 
 func TestOrderdescFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// to see how friend @facets are positioned in output.
 	query := `
 		{
@@ -295,7 +285,7 @@ func TestOrderdescFacets(t *testing.T) {
 }
 
 func TestOrderdescFacetsWithFilters(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 
@@ -343,7 +333,7 @@ func TestOrderdescFacetsWithFilters(t *testing.T) {
 }
 
 func TestFacetsMultipleOrderby(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(33)) {
@@ -386,7 +376,7 @@ func TestFacetsMultipleOrderby(t *testing.T) {
 }
 
 func TestFacetsMultipleOrderbyMultipleUIDs(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(33, 34)) {
@@ -445,7 +435,7 @@ func TestFacetsMultipleOrderbyMultipleUIDs(t *testing.T) {
 }
 
 func TestFacetsMultipleOrderbyNonsortableFacet(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(33)) {
@@ -491,7 +481,7 @@ func TestFacetsMultipleOrderbyNonsortableFacet(t *testing.T) {
 }
 
 func TestFacetsMultipleOrderbyAllFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(33)) {
@@ -540,7 +530,7 @@ func TestFacetsMultipleOrderbyAllFacets(t *testing.T) {
 
 // This test tests multiple order by on facets where some facets in not present in all records.
 func TestFacetsMultipleOrderbyMissingFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(33)) {
@@ -582,7 +572,7 @@ func TestFacetsMultipleOrderbyMissingFacets(t *testing.T) {
 }
 
 func TestRetrieveFacetsAsVars(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// to see how friend @facets are positioned in output.
 	query := `
 		{
@@ -604,7 +594,7 @@ func TestRetrieveFacetsAsVars(t *testing.T) {
 }
 
 func TestRetrieveFacetsUidValues(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// to see how friend @facets are positioned in output.
 	query := `
 		{
@@ -658,7 +648,7 @@ func TestRetrieveFacetsUidValues(t *testing.T) {
 }
 
 func TestRetrieveFacetsAll(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(0x1)) {
@@ -719,7 +709,7 @@ func TestRetrieveFacetsAll(t *testing.T) {
 }
 
 func TestFacetsNotInQuery(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(0x1)) {
@@ -740,7 +730,7 @@ func TestFacetsNotInQuery(t *testing.T) {
 }
 
 func TestSubjectWithNoFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// id 33 does not have any facets associated with name and school
 	query := `
 		{
@@ -759,7 +749,7 @@ func TestSubjectWithNoFacets(t *testing.T) {
 }
 
 func TestFetchingFewFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// only 1 friend of 1 has facet : "close" and she/he has no name
 	query := `
 		{
@@ -803,7 +793,7 @@ func TestFetchingFewFacets(t *testing.T) {
 }
 
 func TestFetchingNoFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// TestFetchingFewFacets but without the facet.  Returns no facets.
 	query := `
 		{
@@ -823,7 +813,7 @@ func TestFetchingNoFacets(t *testing.T) {
 }
 
 func TestFacetsSortOrder(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// order of facets in dql query should not matter.
 	query := `
 		{
@@ -869,7 +859,7 @@ func TestFacetsSortOrder(t *testing.T) {
 }
 
 func TestUnknownFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// uknown facets should be ignored.
 	query := `
 		{
@@ -888,63 +878,8 @@ func TestUnknownFacets(t *testing.T) {
 		js)
 }
 
-func TestFacetsMutation(t *testing.T) {
-	populateClusterWithFacets()
-
-	// Delete friendship between Michonne and Glenn
-	deleteTriplesInCluster("<1> <friend> <24> .")
-	friendFacets := "(since = 2001-11-10T00:00:00Z, close = false, family = false)"
-	// 101 is not close friend now.
-	require.NoError(t,
-		addTriplesToCluster(fmt.Sprintf(`<1> <friend> <101> %s .`, friendFacets)))
-	// This test messes with the test setup, so set facetSetupDone to false so
-	// the next test redoes the setup.
-	facetSetupDone = false
-
-	query := `
-		{
-			me(func: uid(0x1)) {
-				name
-				friend @facets {
-					name
-				}
-			}
-		}
-	`
-
-	js := processQueryNoErr(t, query)
-	require.JSONEq(t, `
-		{
-		    "data": {
-		        "me": [
-		            {
-		                "name": "Michonne",
-		                "friend": [
-		                    {
-		                        "name": "Rick Grimes",
-		                        "friend|since": "2006-01-02T15:04:05Z"
-		                    },
-		                    {
-		                        "name": "Daryl Dixon",
-		                        "friend|close": false,
-		                        "friend|family": true,
-		                        "friend|since": "2007-05-02T15:04:05Z",
-		                        "friend|tag": 34
-		                    },
-		                    {
-		                        "name": "Andrea",
-		                        "friend|since": "2006-01-02T15:04:05Z"
-		                    }
-		                ]
-		            }
-		        ]
-		    }
-		}
-	`, js)
-}
-
 func TestFacetsFilterSimple(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find close friends of 1
 	query := `
 		{
@@ -966,7 +901,7 @@ func TestFacetsFilterSimple(t *testing.T) {
 }
 
 func TestFacetsFilterSimple2(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find close friends of 1
 	query := `
 		{
@@ -987,7 +922,7 @@ func TestFacetsFilterSimple2(t *testing.T) {
 }
 
 func TestFacetsFilterSimple3(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find close friends of 1
 	query := `
 		{
@@ -1008,7 +943,7 @@ func TestFacetsFilterSimple3(t *testing.T) {
 }
 
 func TestFacetsFilterOr(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find close or family friends of 1
 	query := `
 		{
@@ -1030,7 +965,7 @@ func TestFacetsFilterOr(t *testing.T) {
 }
 
 func TestFacetsFilterAnd(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// unknown filters do not have any effect on results.
 	query := `
 		{
@@ -1051,7 +986,7 @@ func TestFacetsFilterAnd(t *testing.T) {
 }
 
 func TestFacetsFilterle(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find friends of 1 below 36 years of age.
 	query := `
 		{
@@ -1072,7 +1007,7 @@ func TestFacetsFilterle(t *testing.T) {
 }
 
 func TestFacetsFilterge(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find friends of 1 above 32 years of age.
 	query := `
 		{
@@ -1093,7 +1028,7 @@ func TestFacetsFilterge(t *testing.T) {
 }
 
 func TestFacetsFilterAndOrle(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find close or family friends of 1 before 2007-01-10
 	query := `
 		{
@@ -1115,7 +1050,7 @@ func TestFacetsFilterAndOrle(t *testing.T) {
 }
 
 func TestFacetsFilterAndOrge2(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find close or family friends of 1 after 2007-01-10
 	query := `
 		{
@@ -1136,7 +1071,7 @@ func TestFacetsFilterAndOrge2(t *testing.T) {
 }
 
 func TestFacetsFilterNotAndOrgeMutuallyExclusive(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// find Not (close or family friends of 1 after 2007-01-10)
 	// Mutually exclusive of above result : TestFacetsFilterNotAndOrge
 	query := `
@@ -1158,7 +1093,7 @@ func TestFacetsFilterNotAndOrgeMutuallyExclusive(t *testing.T) {
 }
 
 func TestFacetsFilterUnknownFacets(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// unknown facets should filter out edges.
 	query := `
 		{
@@ -1179,7 +1114,7 @@ func TestFacetsFilterUnknownFacets(t *testing.T) {
 }
 
 func TestFacetsFilterUnknownOrKnown(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// unknown filters with OR do not have any effect on results
 	query := `
 		{
@@ -1200,7 +1135,7 @@ func TestFacetsFilterUnknownOrKnown(t *testing.T) {
 }
 
 func TestFacetsFilterallofterms(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(31)) {
@@ -1220,7 +1155,7 @@ func TestFacetsFilterallofterms(t *testing.T) {
 }
 
 func TestFacetsFilterAllofMultiple(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(31)) {
@@ -1240,7 +1175,7 @@ func TestFacetsFilterAllofMultiple(t *testing.T) {
 }
 
 func TestFacetsFilterAllofNone(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// nothing matches in allofterms
 	query := `
 		{
@@ -1261,7 +1196,7 @@ func TestFacetsFilterAllofNone(t *testing.T) {
 }
 
 func TestFacetsFilteranyofterms(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(31)) {
@@ -1281,7 +1216,7 @@ func TestFacetsFilteranyofterms(t *testing.T) {
 }
 
 func TestFacetsFilterAnyofNone(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(31)) {
@@ -1301,7 +1236,7 @@ func TestFacetsFilterAnyofNone(t *testing.T) {
 }
 
 func TestFacetsFilterAllofanyofterms(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(31)) {
@@ -1321,7 +1256,7 @@ func TestFacetsFilterAllofanyofterms(t *testing.T) {
 }
 
 func TestFacetsFilterAllofAndanyofterms(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(31)) {
@@ -1341,7 +1276,7 @@ func TestFacetsFilterAllofAndanyofterms(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueBasic(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1356,7 +1291,7 @@ func TestFacetsFilterAtValueBasic(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueListType(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1370,7 +1305,7 @@ func TestFacetsFilterAtValueListType(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueComplex1(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1385,7 +1320,7 @@ func TestFacetsFilterAtValueComplex1(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueComplex2(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1398,7 +1333,7 @@ func TestFacetsFilterAtValueComplex2(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueWithLangs(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1412,7 +1347,7 @@ func TestFacetsFilterAtValueWithLangs(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueWithBadLang(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1425,7 +1360,7 @@ func TestFacetsFilterAtValueWithBadLang(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueWithFacet(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1441,7 +1376,7 @@ func TestFacetsFilterAtValueWithFacet(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueWithFacetAndLangs(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1455,7 +1390,7 @@ func TestFacetsFilterAtValueWithFacetAndLangs(t *testing.T) {
 }
 
 func TestFacetsFilterAtValueWithDifferentFacet(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: has(name)) {
@@ -1471,7 +1406,7 @@ func TestFacetsFilterAtValueWithDifferentFacet(t *testing.T) {
 }
 
 func TestFacetsFilterAndRetrieval(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	// Close should not be retrieved.. only used for filtering.
 	query := `
 		{
@@ -1511,7 +1446,7 @@ func TestFacetsFilterAndRetrieval(t *testing.T) {
 }
 
 func TestFacetWithLang(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(320)) {
@@ -1525,7 +1460,7 @@ func TestFacetWithLang(t *testing.T) {
 }
 
 func TestFilterUidFacetMismatch(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 	{
 		me(func: uid(0x1)) {
@@ -1558,7 +1493,7 @@ func TestFilterUidFacetMismatch(t *testing.T) {
 }
 
 func TestRecurseFacetOrder(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
     {
 		me(func: uid(1)) @recurse(depth: 2) {
@@ -1659,7 +1594,7 @@ func TestRecurseFacetOrder(t *testing.T) {
 }
 
 func TestFacetsAlias(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me(func: uid(0x1)) {
@@ -1711,7 +1646,7 @@ func TestFacetsAlias(t *testing.T) {
 }
 
 func TestFacetsAlias2(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `
 		{
 			me2(func: uid(0x1)) {
@@ -1758,7 +1693,7 @@ func TestTypeExpandFacets(t *testing.T) {
 }
 
 func TestFacetsCascadeScalarPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(1, 23)) @cascade {
 			name @facets
@@ -1787,7 +1722,7 @@ func TestFacetsCascadeScalarPredicate(t *testing.T) {
 }
 
 func TestFacetsCascadeUIDPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(1, 23, 24)) @cascade {
 			name @facets
@@ -1844,7 +1779,7 @@ func TestFacetsCascadeUIDPredicate(t *testing.T) {
 }
 
 func TestFacetsNestedCascade(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(1, 23)) {
 			name @facets
@@ -1901,7 +1836,7 @@ func TestFacetsNestedCascade(t *testing.T) {
 }
 
 func TestFacetsCascadeWithFilter(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(1, 23)) @filter(eq(name, "Michonne")) @cascade {
 			name @facets
@@ -1924,7 +1859,7 @@ func TestFacetsCascadeWithFilter(t *testing.T) {
 }
 
 func TestFacetUIDPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(0x1)) {
 			name
@@ -1952,7 +1887,7 @@ func TestFacetUIDPredicate(t *testing.T) {
 }
 
 func TestFacetUIDListPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(0x1)) {
 			name
@@ -1994,7 +1929,7 @@ func TestFacetUIDListPredicate(t *testing.T) {
 }
 
 func TestFacetValueListPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(1, 12000)) {
 			name@en @facets
@@ -2049,7 +1984,7 @@ func TestFacetValueListPredicate(t *testing.T) {
 }
 
 func TestFacetUIDPredicateWithNormalize(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(0x1)) @normalize {
 			name: name
@@ -2075,7 +2010,7 @@ func TestFacetUIDPredicateWithNormalize(t *testing.T) {
 }
 
 func TestFacetUIDListPredicateWithNormalize(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(0x1)) @normalize {
 			name: name
@@ -2116,7 +2051,7 @@ func TestFacetUIDListPredicateWithNormalize(t *testing.T) {
 }
 
 func TestNestedFacetUIDListPredicateWithNormalize(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(0x1)) @normalize {
 			name: name
@@ -2180,7 +2115,7 @@ func TestNestedFacetUIDListPredicateWithNormalize(t *testing.T) {
 }
 
 func TestFacetValuePredicateWithNormalize(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(1, 12000)) @normalize {
 			eng_name: name@en @facets
@@ -2235,7 +2170,7 @@ func TestFacetValuePredicateWithNormalize(t *testing.T) {
 }
 
 func TestFacetValueListPredicateSingleFacet(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 	query := `{
 		q(func: uid(0x1)) {
 			alt_name @facets(origin)
@@ -2263,7 +2198,7 @@ func TestFacetValueListPredicateSingleFacet(t *testing.T) {
 }
 
 func TestFacetsWithExpand(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 
 	query := `{
 		q(func: uid(14000)) {
@@ -2300,7 +2235,7 @@ func TestFacetsWithExpand(t *testing.T) {
 }
 
 func TestCountFacetsFilteringUidListPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 
 	query := `{
 		q(func: uid(1, 33)) {
@@ -2331,7 +2266,7 @@ func TestCountFacetsFilteringUidListPredicate(t *testing.T) {
 }
 
 func TestCountFacetsFilteringUidPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 
 	query := `{
 		q(func: uid(1, 33)) {
@@ -2362,7 +2297,7 @@ func TestCountFacetsFilteringUidPredicate(t *testing.T) {
 }
 
 func TestCountFacetsFilteringScalarPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 
 	query := `{
 		q(func: uid(1, 23)) {
@@ -2396,7 +2331,7 @@ func TestCountFacetsFilteringScalarPredicate(t *testing.T) {
 }
 
 func TestCountFacetsFilteringScalarListPredicate(t *testing.T) {
-	populateClusterWithFacets()
+	require.NoError(t, populateClusterWithFacets())
 
 	query := `{
 		q(func: uid(1, 12000)) {

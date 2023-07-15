@@ -1,5 +1,7 @@
+//go:build integration || cloud || upgrade
+
 /*
- * Copyright 2017-2022 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017-2023 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +16,7 @@
  * limitations under the License.
  */
 
+//nolint:lll
 package query
 
 import (
@@ -25,16 +28,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dgraph-io/dgo/v210/protos/api"
-	"github.com/dgraph-io/dgraph/testutil"
+	"github.com/dgraph-io/dgo/v230/protos/api"
+	"github.com/dgraph-io/dgraph/x"
 )
 
 func setSchema(schema string) {
 	var err error
 	for retry := 0; retry < 60; retry++ {
-		err = client.Alter(context.Background(), &api.Operation{
-			Schema: schema,
-		})
+		err = client.Alter(context.Background(), &api.Operation{Schema: schema})
 		if err == nil {
 			return
 		}
@@ -54,7 +55,11 @@ func dropPredicate(pred string) {
 
 func processQuery(ctx context.Context, t *testing.T, query string) (string, error) {
 	txn := client.NewTxn()
-	defer txn.Discard(ctx)
+	defer func() {
+		if err := txn.Discard(ctx); err != nil {
+			t.Logf("error discarding txn: %v", err)
+		}
+	}()
 
 	res, err := txn.Query(ctx, query)
 	if err != nil {
@@ -71,7 +76,7 @@ func processQuery(ctx context.Context, t *testing.T, query string) (string, erro
 
 func processQueryRDF(ctx context.Context, t *testing.T, query string) (string, error) {
 	txn := client.NewTxn()
-	defer txn.Discard(ctx)
+	defer func() { _ = txn.Discard(ctx) }()
 
 	res, err := txn.Do(ctx, &api.Request{
 		Query:      query,
@@ -92,7 +97,7 @@ func processQueryNoErr(t *testing.T, query string) string {
 // processQueryForMetrics works like processQuery but returns metrics instead of response.
 func processQueryForMetrics(t *testing.T, query string) *api.Metrics {
 	txn := client.NewTxn()
-	defer txn.Discard(context.Background())
+	defer func() { _ = txn.Discard(context.Background()) }()
 
 	res, err := txn.Query(context.Background(), query)
 	require.NoError(t, err)
@@ -102,7 +107,7 @@ func processQueryForMetrics(t *testing.T, query string) *api.Metrics {
 func processQueryWithVars(t *testing.T, query string,
 	vars map[string]string) (string, error) {
 	txn := client.NewTxn()
-	defer txn.Discard(context.Background())
+	defer func() { _ = txn.Discard(context.Background()) }()
 
 	res, err := txn.QueryWithVars(context.Background(), query, vars)
 	if err != nil {
@@ -120,7 +125,7 @@ func processQueryWithVars(t *testing.T, query string,
 func addTriplesToCluster(triples string) error {
 	txn := client.NewTxn()
 	ctx := context.Background()
-	defer txn.Discard(ctx)
+	defer func() { _ = txn.Discard(ctx) }()
 
 	_, err := txn.Mutate(ctx, &api.Mutation{
 		SetNquads: []byte(triples),
@@ -132,7 +137,7 @@ func addTriplesToCluster(triples string) error {
 func deleteTriplesInCluster(triples string) {
 	txn := client.NewTxn()
 	ctx := context.Background()
-	defer txn.Discard(ctx)
+	defer func() { _ = txn.Discard(ctx) }()
 
 	_, err := txn.Mutate(ctx, &api.Mutation{
 		DelNquads: []byte(triples),
@@ -342,15 +347,15 @@ age2                           : int @index(int) .
 `
 
 func populateCluster() {
-	err := client.Alter(context.Background(), &api.Operation{DropAll: true})
-	if err != nil {
-		panic(fmt.Sprintf("Could not perform DropAll op. Got error %v", err.Error()))
-	}
+	x.Panic(client.Alter(context.Background(), &api.Operation{DropAll: true}))
+
+	// In the query package, we test using hard coded UIDs so that we know what results
+	// to expect. We need to move the max assigned UID in zero to higher value than
+	// all the UIDs we are using during the tests.
+	x.Panic(dc.AssignUids(client, 65536))
 
 	setSchema(testSchema)
-	testutil.AssignUids(100000)
-
-	err = addTriplesToCluster(`
+	err := addTriplesToCluster(`
 		<1> <name> "Michonne" .
 		<2> <name> "King Lear" .
 		<3> <name> "Margaret" .
@@ -476,7 +481,7 @@ func populateCluster() {
 		<31> <friend> <24> .
 		<23> <friend> <1> .
 
-		<2> <best_friend> <64> (since=2019-03-28T14:41:57+30:00) .
+		<2> <best_friend> <64> (since=2019-03-28T07:41:57+23:00) .
 		<3> <best_friend> <64> (since=2018-03-24T14:41:57+05:30) .
 		<4> <best_friend> <64> (since=2019-03-27) .
 
@@ -865,79 +870,39 @@ func populateCluster() {
 		<40> <name2> "Alice" .
 		<41> <age2> "20" .
 	`)
-	if err != nil {
-		panic(fmt.Sprintf("Could not able add triple to the cluster. Got error %v", err.Error()))
-	}
+	x.Panic(err)
 
-	err = addGeoPointToCluster(1, "loc", []float64{1.1, 2.0})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able add geo point to the cluster. Got error %v", err.Error()))
-	}
-	err = addGeoPointToCluster(24, "loc", []float64{1.10001, 2.000001})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able add geo point to the cluster. Got error %v", err.Error()))
-	}
-	err = addGeoPointToCluster(25, "loc", []float64{1.1, 2.0})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able add geo point to the cluster. Got error %v", err.Error()))
-	}
-	err = addGeoPointToCluster(5101, "geometry", []float64{-122.082506, 37.4249518})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able add geo point to the cluster. Got error %v", err.Error()))
-	}
-	err = addGeoPointToCluster(5102, "geometry", []float64{-122.080668, 37.426753})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able add geo point to the cluster. Got error %v", err.Error()))
-	}
-	err = addGeoPointToCluster(5103, "geometry", []float64{-122.2527428, 37.513653})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able add geo point to the cluster. Got error %v", err.Error()))
-	}
+	x.Panic(addGeoPointToCluster(1, "loc", []float64{1.1, 2.0}))
+	x.Panic(addGeoPointToCluster(24, "loc", []float64{1.10001, 2.000001}))
+	x.Panic(addGeoPointToCluster(25, "loc", []float64{1.1, 2.0}))
+	x.Panic(addGeoPointToCluster(5101, "geometry", []float64{-122.082506, 37.4249518}))
+	x.Panic(addGeoPointToCluster(5102, "geometry", []float64{-122.080668, 37.426753}))
+	x.Panic(addGeoPointToCluster(5103, "geometry", []float64{-122.2527428, 37.513653}))
 
-	err = addGeoPolygonToCluster(23, "loc", [][][]float64{
+	x.Panic(addGeoPolygonToCluster(23, "loc", [][][]float64{
 		{{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}, {0.0, 0.0}},
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able to add geo polygon to the cluster. Got error %v",
-			err.Error()))
-	}
-	err = addGeoPolygonToCluster(5104, "geometry", [][][]float64{
+	}))
+	x.Panic(addGeoPolygonToCluster(5104, "geometry", [][][]float64{
 		{{-121.6, 37.1}, {-122.4, 37.3}, {-122.6, 37.8}, {-122.5, 38.3}, {-121.9, 38},
 			{-121.6, 37.1}},
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able to add geo polygon to the cluster. Got error %v",
-			err.Error()))
-	}
-	err = addGeoPolygonToCluster(5105, "geometry", [][][]float64{
+	}))
+	x.Panic(addGeoPolygonToCluster(5105, "geometry", [][][]float64{
 		{{-122.06, 37.37}, {-122.1, 37.36}, {-122.12, 37.4}, {-122.11, 37.43},
 			{-122.04, 37.43}, {-122.06, 37.37}},
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able to add geo polygon to the cluster. Got error %v",
-			err.Error()))
-	}
-	err = addGeoPolygonToCluster(5106, "geometry", [][][]float64{
+	}))
+	x.Panic(addGeoPolygonToCluster(5106, "geometry", [][][]float64{
 		{{-122.25, 37.49}, {-122.28, 37.49}, {-122.27, 37.51}, {-122.25, 37.52},
 			{-122.25, 37.49}},
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able to add geo polygon to the cluster. Got error %v",
-			err.Error()))
-	}
+	}))
 
-	err = addGeoMultiPolygonToCluster(5107, [][][][]float64{
+	x.Panic(addGeoMultiPolygonToCluster(5107, [][][][]float64{
 		{{{-74.29504394531249, 40.19146303804063}, {-74.59716796875, 40.39258071969131},
 			{-74.6466064453125, 40.20824570152502}, {-74.454345703125, 40.06125658140474},
 			{-74.28955078125, 40.17467622056341}, {-74.29504394531249, 40.19146303804063}}},
 		{{{-74.102783203125, 40.8595252289932}, {-74.2730712890625, 40.718119379753446},
 			{-74.0478515625, 40.66813955408042}, {-73.98193359375, 40.772221877329024},
 			{-74.102783203125, 40.8595252289932}}},
-	})
-	if err != nil {
-		panic(fmt.Sprintf("Could not able to add multi polygon to the cluster. Got error %v",
-			err.Error()))
-	}
+	}))
 
 	// Add data for regex tests.
 	nextId := uint64(0x2000)
@@ -952,34 +917,27 @@ func populateCluster() {
 			<%d> <value> "%s" .
 			<0x1234> <pattern> <%d> .
 		`, nextId, p, nextId)
-		err = addTriplesToCluster(triples)
-		if err != nil {
-			panic(fmt.Sprintf("Could not able add triple to the cluster. Got error %v", err.Error()))
-		}
-
+		x.Panic(addTriplesToCluster(triples))
 		nextId++
 	}
 
 	// Add data for datetime tests
 	err = addTriplesToCluster(`
-		<301> <created_at> "2019-03-28T14:41:57+30:00" (modified_at=2019-05-28T14:41:57+30:00) .
-		<302> <created_at> "2019-03-28T13:41:57+29:00" (modified_at=2019-03-28T14:41:57+30:00) .
+		<301> <created_at> "2019-03-28T07:41:57+23:00" (modified_at=2019-05-28T07:41:57+23:00) .
+		<302> <created_at> "2019-03-28T07:41:57+23:00" (modified_at=2019-03-28T07:41:57+23:00) .
 		<303> <created_at> "2019-03-27T14:41:57+06:00" (modified_at=2019-03-29) .
-		<304> <created_at> "2019-03-28T15:41:57+30:00" (modified_at=2019-03-27T14:41:57+06:00) .
-		<305> <created_at> "2019-03-28T13:41:57+30:00" (modified_at=2019-03-28) .
-		<306> <created_at> "2019-03-24T14:41:57+05:30" (modified_at=2019-03-28T13:41:57+30:00) .
-		<307> <created_at> "2019-05-28T14:41:57+30:00" .
+		<304> <created_at> "2019-03-28T08:41:57+23:00" (modified_at=2019-03-27T14:41:57+06:00) .
+		<305> <created_at> "2019-03-28T06:41:57+23:00" (modified_at=2019-03-28) .
+		<306> <created_at> "2019-03-24T14:41:57+05:30" (modified_at=2019-03-28T06:41:57+23:00) .
+		<307> <created_at> "2019-05-28T07:41:57+23:00" .
 
-		<301> <updated_at> "2019-03-28T14:41:57+30:00" (modified_at=2019-05-28) .
-		<302> <updated_at> "2019-03-28T13:41:57+29:00" (modified_at=2019-03-28T14:41:57+30:00) .
-		<303> <updated_at> "2019-03-27T14:41:57+06:00" (modified_at=2019-03-28T13:41:57+29:00) .
+		<301> <updated_at> "2019-03-28T07:41:57+23:00" (modified_at=2019-05-28) .
+		<302> <updated_at> "2019-03-28T06:41:57+22:00" (modified_at=2019-03-28T07:41:57+23:00) .
+		<303> <updated_at> "2019-03-27T14:41:57+06:00" (modified_at=2019-03-28T05:41:57+21:00) .
 		<304> <updated_at> "2019-03-27T09:41:57" .
-		<305> <updated_at> "2019-03-28T13:41:57+30:00" (modified_at=2019-03-28T15:41:57+30:00) .
-		<306> <updated_at> "2019-03-24T14:41:57+05:30" (modified_at=2019-03-28T13:41:57+30:00) .
+		<305> <updated_at> "2019-03-28T06:41:57+23:00" (modified_at=2019-03-28T08:41:57+23:00) .
+		<306> <updated_at> "2019-03-24T14:41:57+05:30" (modified_at=2019-03-28T06:41:57+23:00) .
 		<307> <updated_at> "2019-05-28" (modified_at=2019-03-24T14:41:57+05:30) .
 	`)
-	if err != nil {
-		panic(fmt.Sprintf("Could not able add triple to the cluster. Got error %v", err.Error()))
-	}
-
+	x.Panic(err)
 }
